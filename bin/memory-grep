@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# memory-grep: keyword search across the whole personal memory tree.
+# Semantic search is for concepts; this is for exact identifiers —
+# names, dates, confirmation numbers, addresses.
+# Usage: memory-grep <pattern> [context-lines]
+#   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
+set -u
+ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
+PATTERN="${1:?usage: memory-grep <pattern> [context-lines]}"
+CTX="${2:-2}"
+rg -n -i -C "$CTX" --no-heading \
+  "$PATTERN" \
+  "$ROOT/MEMORY.md" \
+  "$ROOT/memory/personalization.md" \
+  "$ROOT/memory/INDEX.md" \
+  "$ROOT/memory/people" \
+  "$ROOT/memory/groups" \
+  "$ROOT/memory/topics" \
+  "$ROOT/memory/trace" \
+  "$ROOT/memory/bank" \
+  2>/dev/null | head -80

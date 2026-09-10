@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# memory-guard: pre-write / audit scan for memory content.
+# Secrets are a hard block; financial figures are flagged for human review.
+# Usage: memory-guard [path ...]   (default: the standard memory tree,
+#   excluding runtime-managed bank/)
+# Exit: 0 = clean, 1 = secrets found (BLOCK the write), 2 = figures only.
+set -u
+ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
+
+if [ "$#" -gt 0 ]; then
+  TARGETS=("$@")
+else
+  TARGETS=("$ROOT/MEMORY.md" "$ROOT/memory/personalization.md"
+           "$ROOT/memory/INDEX.md" "$ROOT/memory/people"
+           "$ROOT/memory/groups" "$ROOT/memory/topics"
+           "$ROOT/memory/trace")
+  # daily logs, if any
+  for f in "$ROOT"/memory/20*.md; do [ -e "$f" ] && TARGETS+=("$f"); done
+fi
+
+SECRET_RE='sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|api[_-]?key["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9_.-]{16,}|password["'"'"' ]*[:=]["'"'"' ]*[^ ]+|passwd["'"'"' ]*[:=]'
+FIGURE_RE='\B\$[0-9][0-9,]*(\.[0-9]+)?[kKmM]?\b'
+
+status=0
+echo "--- secrets:"
+secrets=$(grep -rniE -- "$SECRET_RE" "${TARGETS[@]}" 2>/dev/null | head -20)
+if [ -n "$secrets" ]; then
+  printf '%s\n' "$secrets"
+  echo "BLOCKED: secrets detected — remove before writing to memory."
+  status=1
+else
+  echo "none"
+fi
+echo "--- financial figures (review):"
+figures=$(grep -rniE -- "$FIGURE_RE" "${TARGETS[@]}" 2>/dev/null | head -20)
+if [ -n "$figures" ]; then
+  printf '%s\n' "$figures"
+  [ "$status" -eq 0 ] && status=2
+  echo "Review: figures belong in the private dashboard/chat, not memory."
+else
+  echo "none"
+fi
+exit "$status"

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# init-memory: create the personal memory directory skeleton.
+# Never overwrites existing files.
+# Usage: init-memory [memory-root]
+#   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
+set -u
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${1:-${PERSONAL_MEMORY_ROOT:-$HOME}}"
+MEM="$ROOT/memory"
+
+mk() { # mk <dest> <asset> — copy asset only if dest is missing
+  local dest="$1" asset="$2"
+  if [ -e "$dest" ]; then
+    echo "keep  $dest"
+  else
+    mkdir -p "$(dirname "$dest")"
+    cp "$SKILL_DIR/assets/$asset" "$dest"
+    echo "wrote $dest"
+  fi
+}
+
+mkdir -p "$MEM"/{people,groups,topics,trace,bank}
+
+mk "$ROOT/MEMORY.md"              MEMORY.md
+mk "$MEM/personalization.md"     personalization.md
+mk "$MEM/INDEX.md"               INDEX.md
+mk "$MEM/trace/INDEX.md"         trace-INDEX.md
+mk "$MEM/trace/trace.md"         trace.md
+
+echo "done. Memory root: $ROOT"
+echo "next: fill in the central profile + personalization, then schedule the refresh (see references/cron-templates.md)."

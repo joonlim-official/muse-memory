@@ -60,6 +60,20 @@ WORKFLOW:
 8. [Optional: on one run per week, a health audit — entry counts per area,
    expired items, open threads older than 30 days, full guard scan.]
 
+CORRECTION WATCHER (recommended): when scanning recent conversations,
+watch for corrections ("no", "actually", "that's wrong", "don't") — each
+one is a learning. Update the wrong memory, add a `|learning|` trace entry,
+and record what the correction teaches about the user's preferences.
+
+DATING DISCIPLINE: the daily log filename is always the user's *local*
+date (`YYYY-MM-DD` in their timezone), never UTC. A run that crosses
+midnight still files under the date the user experienced.
+
+WATERMARKS: each job owns its watermark file (ISO date or datetime, one
+value, no prose). The refresh job and the watcher use *separate* watermark
+files so the two never interfere. A missing watermark means "look back 2
+days", not "start from zero".
+
 READ DISCIPLINE (for the agent using this memory): read the index first,
 then at most 1–3 pages relevant to the task — never preload the whole
 tree. Surface nothing rather than noise. Re-verify facts older than ~90

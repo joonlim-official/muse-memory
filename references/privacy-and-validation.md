@@ -16,6 +16,16 @@ These live elsewhere, never in memory files, skills, or operational docs:
 - **Government IDs, account numbers** — note that the item exists and where
   it lives, never the value.
 
+### Figure hygiene in daily logs
+
+Daily logs are memory files, so the figure rule applies to them too. When
+an extraction needs figures for grounding (e.g. "reconciled the tax
+estimate against the return"), the daily log records *that the extraction
+happened, what was concluded, and where the figures live* — not the figures
+themselves. The weekly audit's guard scan flags any figures that slipped in
+(exit 2); they are reported for the user's review, never auto-deleted, and
+never promoted into curated files.
+
 ## Validation rule
 
 Every trace entry and curated fact must trace to ground truth: a log, a

@@ -38,6 +38,7 @@ All paths are relative to the memory root (`$PERSONAL_MEMORY_ROOT`, default
 | Preference or habit pattern | `~/memory/personalization.md` |
 | Day-to-day detail | `~/memory/<date>.md` |
 | Something changed / opened / closed | `~/memory/trace/trace.md` (plus the fact's home) |
+| Time-bound plan or event (trip, project, deadline) | `~/memory/trace/trace.md` as an **open thread** with `valid_until`; detail lives on the relevant topic page; curated files (`MEMORY.md`, central profile, personalization) keep a one-line pointer only — never the full itinerary |
 
 ## Principles
 
@@ -50,3 +51,6 @@ All paths are relative to the memory root (`$PERSONAL_MEMORY_ROOT`, default
   counts, prices, schedules) is written as "as of YYYY-MM-DD".
 - **Indexes are the map.** Each `INDEX.md` lists every page in its directory
   with a one-line description, closest/most important first.
+- **Dated plans decay.** A time-bound plan kept in full in a curated file
+  will rot there. The trace's `valid_until` + open thread is the mechanism
+  that retires it; the curated files only point at it.

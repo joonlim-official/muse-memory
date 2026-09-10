@@ -4,6 +4,8 @@
 # names, dates, confirmation numbers, addresses.
 # Usage: memory-grep <pattern> [context-lines] | memory-grep --help
 #   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
+#   Set $PERSONAL_MEMORY_PROFILE to also search the central profile
+#   document (it lives outside the memory root by design).
 set -u
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -22,14 +24,19 @@ if command -v rg >/dev/null 2>&1; then
 else
   SEARCH=(grep -r -n -i -C "$CTX")
 fi
-"${SEARCH[@]}" \
-  "$PATTERN" \
-  "$ROOT/MEMORY.md" \
-  "$ROOT/memory/personalization.md" \
-  "$ROOT/memory/INDEX.md" \
-  "$ROOT/memory/people" \
-  "$ROOT/memory/groups" \
-  "$ROOT/memory/topics" \
-  "$ROOT/memory/trace" \
-  "$ROOT/memory/bank" \
-  2>/dev/null | head -80
+TARGETS=(
+  "$ROOT/MEMORY.md"
+  "$ROOT/memory/personalization.md"
+  "$ROOT/memory/INDEX.md"
+  "$ROOT/memory/people"
+  "$ROOT/memory/groups"
+  "$ROOT/memory/topics"
+  "$ROOT/memory/trace"
+  "$ROOT/memory/bank"
+)
+# daily logs, if any
+for f in "$ROOT"/memory/20*.md; do [ -e "$f" ] && TARGETS+=("$f"); done
+# central profile lives outside the memory root; include it when set
+[ -n "${PERSONAL_MEMORY_PROFILE:-}" ] && [ -e "$PERSONAL_MEMORY_PROFILE" ] \
+  && TARGETS+=("$PERSONAL_MEMORY_PROFILE")
+"${SEARCH[@]}" "$PATTERN" "${TARGETS[@]}" 2>/dev/null | head -80

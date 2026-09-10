@@ -2,13 +2,27 @@
 # memory-grep: keyword search across the whole personal memory tree.
 # Semantic search is for concepts; this is for exact identifiers —
 # names, dates, confirmation numbers, addresses.
-# Usage: memory-grep <pattern> [context-lines]
+# Usage: memory-grep <pattern> [context-lines] | memory-grep --help
 #   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
 set -u
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  echo "usage: memory-grep <pattern> [context-lines]"
+  echo "  Keyword search across the personal memory tree — for exact"
+  echo "  identifiers (names, dates, confirmation numbers), not concepts."
+  echo "  memory root defaults to \$PERSONAL_MEMORY_ROOT, then \$HOME."
+  exit 0
+fi
+
 ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
 PATTERN="${1:?usage: memory-grep <pattern> [context-lines]}"
 CTX="${2:-2}"
-rg -n -i -C "$CTX" --no-heading \
+if command -v rg >/dev/null 2>&1; then
+  SEARCH=(rg -n -i -C "$CTX" --no-heading)
+else
+  SEARCH=(grep -r -n -i -C "$CTX")
+fi
+"${SEARCH[@]}" \
   "$PATTERN" \
   "$ROOT/MEMORY.md" \
   "$ROOT/memory/personalization.md" \

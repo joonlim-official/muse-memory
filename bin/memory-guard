@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 # memory-guard: pre-write / audit scan for memory content.
 # Secrets are a hard block; financial figures are flagged for human review.
-# Usage: memory-guard [path ...]   (default: the standard memory tree,
-#   excluding runtime-managed bank/)
+# Usage: memory-guard [path ...] | memory-guard --help
+#   (default: the standard memory tree, excluding runtime-managed bank/)
 # Exit: 0 = clean, 1 = secrets found (BLOCK the write), 2 = figures only.
 set -u
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  echo "usage: memory-guard [path ...]"
+  echo "  Pre-write / audit scan for memory content."
+  echo "  exit 0 = clean, 1 = secrets found (block the write),"
+  echo "  2 = financial figures only (flag for human review)."
+  exit 0
+fi
+
 ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
 
 if [ "$#" -gt 0 ]; then

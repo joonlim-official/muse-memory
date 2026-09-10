@@ -1,0 +1,11 @@
+# Editor and OS noise — never committed.
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local test sandboxes
+/memtest/

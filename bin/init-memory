@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 # init-memory: create the personal memory directory skeleton.
 # Never overwrites existing files.
-# Usage: init-memory [memory-root]
+# Usage: init-memory [memory-root] | init-memory --help
 #   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
 set -u
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  echo "usage: init-memory [memory-root]"
+  echo "  Create the personal memory directory skeleton from the"
+  echo "  templates in assets/. Never overwrites existing files —"
+  echo "  safe to re-run. Root defaults to \$PERSONAL_MEMORY_ROOT, then \$HOME."
+  exit 0
+fi
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="${1:-${PERSONAL_MEMORY_ROOT:-$HOME}}"

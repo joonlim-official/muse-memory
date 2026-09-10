@@ -2,21 +2,82 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![bash](https://img.shields.io/badge/made%20with-bash-4EAA25.svg)](bin/)
+[![zero dependencies](https://img.shields.io/badge/dependencies-zero-blue.svg)](bin/)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-Your AI assistant's long-term memory — as a system, not a junk drawer.
+**Give your AI assistant a memory that compounds.**
 
-> Most assistant memory is either a pile of notes or a black box.
-> **muse-memory** is a small, opinionated operating system for remembering
-> what matters, forgetting what doesn't, and knowing the difference.
+> Chat transcripts are a junk drawer. Vector stores are a black box.
+> **muse-memory** is a small, opinionated operating system for long-term
+> memory: plain markdown files, a strict routing discipline, and an
+> append-only temporal trace — so your assistant remembers what matters,
+> forgets what doesn't, and can always tell you *how it knows*.
 
-## Why
+## The problem
 
-Assistants forget. When they do remember, it's usually one of two failure
-modes: a sprawling dump of chat logs nobody can search, or a hidden vector
-store nobody can audit. This takes a third path — **plain markdown files,
-a strict routing discipline, and a temporal log** — so the memory stays
-organized, searchable, and human-inspectable for years.
+AI assistants forget everything between sessions — or worse, they
+"remember" things you can't see, can't correct, and can't trust. The two
+usual answers both fail:
+
+- **A pile of chat logs** — searchable in theory, a swamp in practice. Six
+  months in, nothing is findable and contradictions pile up silently.
+- **A hidden vector store** — convenient, opaque. You can't audit what it
+  believes about you, and neither can it.
+
+muse-memory takes a third path: **your memory as files you own.** Every fact
+has exactly one home, every change is logged with its source, and history is
+superseded rather than deleted — so the whole evolution of any belief stays
+readable.
+
+## What it feels like
+
+Six months in, you ask about something from last spring:
+
+> **You:** "What did we decide about the home gym?"
+>
+> **Assistant:** "You ruled out the garage in March — too cold in winter,
+> and you wanted the space for the workshop. We landed on the spare room
+> with a foldable rack. That decision superseded the garage plan on
+> 2026-03-14, sourced from our planning thread. Want to revisit it?"
+
+No hallucinated confidence. No "as an AI I don't have memory of that." The
+answer carries its own provenance — *what* changed, *when*, and *where it
+came from*.
+
+## Clear wins
+
+**1. The plan that changed — without losing history.**
+Jane told her assistant in February she'd fly to Tokyo in April. In March
+she moved it to October. The trace now reads:
+
+```markdown
+- [travel] superseded |decision| — Japan trip moved from April to October;
+  April fares were 2x October's. Replaces the 2026-02-10 plan.
+  valid_until: 2026-10-31. (src: user's message, 2026-03-02)
+```
+
+Six months later the assistant doesn't quote the dead April plan — and if
+Jane asks "wait, didn't we say April?", the full evolution is right there.
+
+**2. The expiry that fired on its own.**
+A trace entry carried `valid_until: 2026-05-01` on a hotel promo Jane was
+considering. The weekly audit found the date had passed, marked the entry
+`superseded`, and closed the open thread. Nobody had to remember to clean
+it up — the system did, and the log shows exactly when.
+
+**3. The secret that never got written.**
+Jane pasted an API key into chat while debugging. The assistant drafted a
+memory update including it; `bin/memory-guard` scanned the draft and exited
+1 — **BLOCKED: secrets detected**. The key never touched a memory file.
+Financial figures get the softer treatment: flagged for Jane's review,
+never auto-deleted, never silently kept.
+
+**4. The contradiction it refused to bury.**
+Jane's calendar showed a dentist appointment Tuesday; she later said "I
+moved the dentist to Thursday." Instead of silently overwriting, the old
+entry was marked `superseded` with a pointer to the new one, both
+source-cited. When the Tuesday reminder confusion came up, the answer was
+in the log — not in someone's faulty recollection.
 
 ## How it works
 
@@ -47,8 +108,33 @@ Three disciplines keep it honest:
 Every significant change also lands in the **temporal trace** — an
 append-only, newest-first log with typed entries (`fact`, `preference`,
 `decision`, `learning`, `relationship`, `context`), source citations, and
-open/closed status. History is superseded, never deleted, so any event's
-evolution stays readable.
+open/closed status. History is superseded, never deleted. (See "Clear wins"
+above for what this looks like in practice.)
+
+## Compared to the alternatives
+
+| | Chat logs | Vector memory services | muse-memory |
+|---|---|---|---|
+| You can read it | technically | no | yes — it's markdown |
+| You can correct it | no | no | yes — edit the file |
+| Knows *how* it knows | no | no | yes — every entry cites its source |
+| Contradictions | pile up silently | pile up silently | superseded, never deleted |
+| Your data leaves your machine | depends | yes | never |
+| Dependencies | none | SDK + API + billing | bash |
+
+If you want memory-as-a-service with embeddings and managed infrastructure,
+use a memory API. If you want memory-as-files you fully own and can audit
+with `grep`, this is it.
+
+## Who it's for
+
+- **For:** people who live in an AI assistant daily and want it to
+  genuinely know them — their family, projects, preferences, and history —
+  without re-explaining everything every session.
+- **For:** the privacy-minded — nothing leaves your machine, and the guard
+  blocks secrets and financial figures from ever entering memory.
+- **Not for:** anyone who wants zero setup. You write the first page about
+  yourself, and you schedule one daily job. After that it runs itself.
 
 ## Quickstart
 
@@ -73,6 +159,11 @@ The skill text targets Claude-style agents, but the layout, conventions, and
 scripts are assistant-agnostic — any agent that can read markdown and run
 shell commands can use them.
 
+After 30 days you have: a curated profile of the user, per-person and
+per-topic pages, a temporal log of everything that changed, and a weekly
+audit keeping it all honest. After a year, it's the closest thing to an
+assistant that actually knows you.
+
 ## Layout
 
 ```
@@ -90,6 +181,36 @@ bin/
 The memory itself lives outside this repo (default: the user's home
 directory). This repo ships the *system* — blank templates only, no personal
 data.
+
+## FAQ
+
+**Why not just use embeddings / a vector DB?**
+You can — nothing here forbids it. But retrieval isn't the hard part of
+memory; *curation* is. Vectors find similar text; they don't resolve
+contradictions, expire stale plans, or tell you where a belief came from.
+This system does the curatorial work, in files you can read. Add embeddings
+on top later if you want them.
+
+**Does it work with my agent / model?**
+If your agent can read markdown and run shell commands, yes. The
+conventions are plain text; the scripts are bash. The skill prose targets
+Claude-style agents but nothing in the layout is model-specific.
+
+**How big does the memory get?**
+Small. The write discipline ("default is not to write") keeps curated files
+tight — durable facts only. Day-to-day detail goes in dated logs, and the
+weekly audit expires and dedupes. A year of daily use is typically a few
+hundred kilobytes of markdown.
+
+**What if the assistant writes something wrong?**
+That's what the trace is for. Correct the file, add a `superseded` entry
+pointing at the fix, and the mistake stays visible as history instead of
+silently corrupting the record.
+
+**Is my data safe?**
+The repo contains zero personal data by design — only the system and blank
+templates. Your memory lives on your machine. `memory-guard` blocks secrets
+and flags financial figures on every write.
 
 ## Privacy & safety
 
@@ -113,4 +234,5 @@ truthful, more findable, or quieter?*
 
 ## License
 
-[MIT](LICENSE) — use it, fork it, teach your assistant with it.
+[MIT](LICENSE) — use it, fork it, teach your assistant with it. If it
+remembers you well, tell someone.

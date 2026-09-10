@@ -20,8 +20,9 @@ what is still open, and a scheduled job that collects, updates, and refines it.
    about the user. Nothing goes into memory without the user's approval
    (see `references/privacy-and-validation.md`).
 3. Schedule the refresh (see `references/cron-templates.md`): one daily
-   collect/update/refine job, plus an optional lightweight watcher that
-   surfaces urgent items between runs.
+   collect/update/refine job, an optional lightweight watcher that
+   surfaces urgent items between runs, and an optional nightly evaluation
+   that audits the system's disciplines.
 
 ### 2. Reading memory
 - Search BEFORE answering anything about prior work, decisions, dates,
@@ -47,8 +48,10 @@ what is still open, and a scheduled job that collects, updates, and refines it.
   `people/`, `groups/`, `topics/` (each with an `INDEX.md`), `trace/`
   (`INDEX.md` + append-only `trace.md`), and dated daily logs.
 - `trace/trace.md` is append-only, newest first, every entry source-cited.
-- One scheduled job keeps the memory current; an optional watcher surfaces
-  urgent items between runs. Both stay silent unless something is worth the
+- Three scheduled jobs keep the memory current: one daily collect/update/
+  refine job, an optional lightweight watcher that surfaces urgent items
+  between runs, and an optional nightly evaluation that audits the
+  system's disciplines. All stay silent unless something is worth the
   user's attention.
 
 ## Operating Rules

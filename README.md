@@ -150,10 +150,11 @@ cd muse-memory
 # 2. Fill in MEMORY.md and memory/personalization.md with what you know
 #    about the user. Nothing goes in without their approval.
 
-# 3. Schedule the refresh — see references/cron-templates.md:
-#    one daily collect/update/refine job, plus an optional lightweight
-#    watcher that surfaces urgent items between runs. Both stay silent
-#    unless something is worth the user's attention.
+# 3. Schedule the jobs — see references/cron-templates.md:
+#    one daily collect/update/refine job, an optional lightweight
+#    watcher that surfaces urgent items between runs, and an optional
+#    nightly evaluation that audits the system's disciplines. All stay
+#    silent unless something is worth the user's attention.
 ```
 
 Requirements: `bash`, `git`. `ripgrep` optional (falls back to `grep`).

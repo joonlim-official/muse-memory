@@ -1,6 +1,6 @@
 # Cron templates
 
-Two jobs. Adapt the bracketed placeholders to the installation: account
+Three jobs. Adapt the bracketed placeholders to the installation: account
 names, CLI commands, schedule times, and the user's timezone. Keep
 installation-specific detail in the job bodies, not in the skill.
 
@@ -104,6 +104,42 @@ DELIVERY: Stay silent unless something is truly urgent. Between [quiet hours],
 only interrupt for what cannot wait until morning; hold the rest for the
 daily refresh. When urgent, send one short message naming what it is and
 what action is needed — nothing else.
+```
+
+## Job 3 — Nightly evaluation (optional but recommended)
+
+A short nightly audit that verifies the memory system is holding its
+disciplines. It EVALUATES ONLY — it never writes to memory files. This is
+the job that catches drift the daily refresh missed.
+
+```markdown
+Nightly evaluation of the personal memory system. This job evaluates
+only — it never writes to memory files. Stay silent unless something
+needs the user's attention.
+
+CHECKS (run each night):
+1. Guard scan: run `bin/memory-guard` over the memory tree. Secrets
+   (exit 1) = alert immediately, naming file and line. Figures (exit 2) =
+   include in the report for the user's review.
+2. Trace format: read the top 40 lines of the trace log. Every entry must
+   be one line, carry a |type|, and cite a source (src:). List malformed
+   entries.
+3. Expiry: find `valid_until` dates in the past on entries still marked
+   open/new/updated. List them — the daily refresh should have expired
+   them.
+4. Open threads older than 30 days: list them.
+5. Duplication drift: check whether the same long passage (3+ lines)
+   appears verbatim in more than one curated file. List duplicates found.
+6. Daily log check: confirm today's daily log exists and is filed under
+   the user's local date (never UTC). Flag missing or future-dated logs.
+7. Refresh-job check: read the refresh job's watermark file. If missing
+   or older than yesterday, the daily refresh may have missed a run —
+   flag it. (Skip this check until the refresh job has had its first
+   scheduled run.)
+
+DELIVERY: one short message, only if something above needs attention
+(secrets, malformed entries, missed refresh, new duplication drift).
+Otherwise stay completely silent — no news is good news.
 ```
 
 ## Notes

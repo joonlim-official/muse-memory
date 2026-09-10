@@ -179,6 +179,8 @@ bin/
   init-memory       create the directory skeleton (idempotent)
   memory-grep       keyword search across the memory tree (exact identifiers)
   memory-guard      pre-write scanner: secrets block, figures get flagged
+  memory-audit      nightly audit: format, expiry, stale threads, drift,
+                    dating, watermark — evaluates, never writes
 ```
 
 The memory itself lives outside this repo (default: the user's home

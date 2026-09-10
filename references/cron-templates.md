@@ -110,37 +110,45 @@ what action is needed — nothing else.
 
 A short nightly audit that verifies the memory system is holding its
 disciplines. It EVALUATES ONLY — it never writes to memory files. This is
-the job that catches drift the daily refresh missed.
+the job that catches drift the daily refresh missed. The skill ships
+`bin/memory-audit`, which runs the checks deterministically.
 
 ```markdown
 Nightly evaluation of the personal memory system. This job evaluates
 only — it never writes to memory files. Stay silent unless something
 needs the user's attention.
 
-CHECKS (run each night):
-1. Guard scan: run `bin/memory-guard` over the memory tree. Secrets
-   (exit 1) = alert immediately, naming file and line. Figures (exit 2) =
-   include in the report for the user's review.
-2. Trace format: read the top 40 lines of the trace log. Every entry must
-   be one line, carry a |type|, and cite a source (src:). List malformed
-   entries.
-3. Expiry: find `valid_until` dates in the past on entries still marked
-   open/new/updated. List them — the daily refresh should have expired
-   them.
-4. Open threads older than 30 days: list them.
-5. Duplication drift: check whether the same long passage (3+ lines)
-   appears verbatim in more than one curated file. List duplicates found.
-6. Daily log check: confirm today's daily log exists and is filed under
-   the user's local date (never UTC). Flag missing or future-dated logs.
-7. Refresh-job check: read the refresh job's watermark file. If missing
-   or older than yesterday, the daily refresh may have missed a run —
-   flag it. (Skip this check until the refresh job has had its first
-   scheduled run.)
+1. Run `bin/memory-audit [memory-root]` (set $MEMORY_WATERMARK_FILE to
+   the refresh job's watermark to enable the watermark check). It checks:
+   guard scan (secrets = exit 2, figures = exit 1 item), trace entry
+   format, expired valid_until items still open, open threads older than
+   30 days, duplication drift across curated files, daily-log dating, and
+   the refresh watermark. It prints a markdown report and exits 0 clean /
+   1 issues / 2 secrets.
+2. Review the report. Secrets (exit 2) = alert the user immediately,
+   naming file and line.
 
-DELIVERY: one short message, only if something above needs attention
-(secrets, malformed entries, missed refresh, new duplication drift).
-Otherwise stay completely silent — no news is good news.
+SELF-FEEDBACK LOOP: the audit doesn't just report — it improves the
+system. For each finding, ask: is this an *instance* problem or a
+*system* problem?
+- Instance problem (one bad entry, one missed expiry) → fix the memory
+  files per the routing table and add a trace entry.
+- System problem (the same check fails 2+ nights running) → the system
+  is wrong, not the data. Patch the skill itself: tighten the doc, fix
+  the script, add a routing row. Record it as a |learning| trace entry
+  so the fix is visible in the log.
+The loop closes when a night goes clean because the system got better,
+not because someone hand-fixed the symptoms again.
+
+DELIVERY: one short message, only if something needs the user's
+attention (secrets, a system problem worth their approval, a finding
+the user should know about). Otherwise stay completely silent — no news
+is good news.
 ```
+
+The loop is what makes the three jobs a system rather than three chores:
+the refresh maintains the memory, the audit checks the maintenance, and
+the feedback step fixes the maintainer.
 
 ## Notes
 

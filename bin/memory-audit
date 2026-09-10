@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# memory-audit: deterministic nightly audit of the personal memory system.
+# Evaluates the disciplines; never writes to memory files.
+# Usage: memory-audit [memory-root] | memory-audit --help
+#   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
+#   Set $MEMORY_WATERMARK_FILE to also check the refresh job's watermark
+#   (installation-specific; skipped when unset).
+# Exit: 0 = clean, 1 = issues found, 2 = secrets found (from memory-guard).
+set -u
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  echo "usage: memory-audit [memory-root]"
+  echo "  Deterministic nightly audit: guard scan, trace format, expiry,"
+  echo "  stale open threads, duplication drift, daily-log dating,"
+  echo "  refresh watermark. Never writes to memory files."
+  echo "  exit 0 = clean, 1 = issues found, 2 = secrets found."
+  exit 0
+fi
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${1:-${PERSONAL_MEMORY_ROOT:-$HOME}}"
+MEM="$ROOT/memory"
+TODAY="$(date +%F)"
+CUTOFF="$(date -d '30 days ago' +%F 2>/dev/null || date -v-30d +%F)"
+ISSUES=0
+
+say()  { printf '%s\n' "$*"; }
+flag() { say "  ! $*"; ISSUES=1; }
+
+say "# memory-audit — $TODAY (root: $ROOT)"
+say ""
+
+# 1. guard scan -----------------------------------------------------------
+say "## 1. guard scan"
+guard_out="$("$SKILL_DIR/bin/memory-guard" 2>&1)"
+guard_status=$?
+say "$guard_out" | sed 's/^/  /'
+if [ "$guard_status" -eq 1 ]; then
+  flag "SECRETS detected — investigate before any further write."
+  say ""
+  echo "AUDIT RESULT: secrets found"
+  exit 2
+elif [ "$guard_status" -eq 2 ]; then
+  flag "financial figures present — flagged for human review."
+fi
+say ""
+
+# 2. trace format ---------------------------------------------------------
+say "## 2. trace format (top 40 entries)"
+bad=0
+if [ -f "$MEM/trace/trace.md" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      "- ["*)
+        if ! printf '%s' "$line" | grep -q '|.*|' || \
+           ! printf '%s' "$line" | grep -q '(src:'; then
+          flag "malformed entry: $line"
+          bad=1
+        fi
+        ;;
+    esac
+  done < <(grep '^- \[' "$MEM/trace/trace.md" | head -40)
+  [ "$bad" -eq 0 ] && say "  ok — all entries one-line, typed, sourced."
+else
+  flag "trace.md missing."
+fi
+say ""
+
+# 3. expired valid_until --------------------------------------------------
+say "## 3. expired valid_until still open"
+expired=0
+if [ -f "$MEM/trace/trace.md" ]; then
+  while IFS= read -r line; do
+    d="$(printf '%s' "$line" | grep -oE 'valid_until: [0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk '{print $2}')"
+    if [ -n "$d" ] && [[ "$d" < "$TODAY" ]]; then
+      case "$line" in
+        *open*|*new*|*updated*)
+          flag "expired $d not retired: $(printf '%s' "$line" | cut -c1-100)"
+          expired=1
+          ;;
+      esac
+    fi
+  done < <(grep 'valid_until:' "$MEM/trace/trace.md")
+  [ "$expired" -eq 0 ] && say "  ok — nothing past due and still open."
+fi
+say ""
+
+# 4. open threads older than 30 days ---------------------------------------
+say "## 4. open threads older than 30 days"
+stale=0
+if [ -f "$MEM/trace/trace.md" ]; then
+  while IFS= read -r line; do
+    d="$(printf '%s' "$line" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | tail -1)"
+    if [ -n "$d" ] && [[ "$d" < "$CUTOFF" ]]; then
+      flag "stale open thread (src date $d): $(printf '%s' "$line" | cut -c1-100)"
+      stale=1
+    fi
+  done < <(grep '^- \[.*open' "$MEM/trace/trace.md")
+  [ "$stale" -eq 0 ] && say "  ok — no open thread older than 30 days."
+fi
+say ""
+
+# 5. duplication drift ----------------------------------------------------
+say "## 5. duplication drift (long lines repeated across curated files)"
+tmp="$(mktemp)"
+curated=("$ROOT/MEMORY.md" "$MEM/personalization.md")
+for f in "$MEM"/people/*.md "$MEM"/groups/*.md "$MEM"/topics/*.md; do
+  [ -e "$f" ] && curated+=("$f")
+done
+[ -n "${PERSONAL_MEMORY_PROFILE:-}" ] && [ -e "$PERSONAL_MEMORY_PROFILE" ] \
+  && curated+=("$PERSONAL_MEMORY_PROFILE")
+for f in "${curated[@]}"; do
+  [ -f "$f" ] && awk -v F="$f" 'length > 140 {print $0 "	@@@" F}' "$f"
+done | sort -t '	' -k1,1 | awk -F'	' '{print $1}' | uniq -d > "$tmp"
+if [ -s "$tmp" ]; then
+  while IFS= read -r line; do
+    files="$(for f in "${curated[@]}"; do grep -lF -- "$line" "$f" 2>/dev/null; done | tr '\n' ' ')"
+    flag "duplicated passage: $(printf '%s' "$line" | cut -c1-80)…"
+    say "      in: $files"
+  done < "$tmp"
+else
+  say "  ok — no long passage repeated across curated files."
+fi
+rm -f "$tmp"
+say ""
+
+# 6. daily log dating ------------------------------------------------------
+say "## 6. daily log dating (local date: $TODAY)"
+if [ -f "$MEM/$TODAY.md" ]; then
+  say "  ok — today's log exists."
+else
+  flag "today's daily log ($TODAY.md) is missing."
+fi
+future="$(find "$MEM" -maxdepth 1 -name '20*.md' | while read -r f; do
+  b="$(basename "$f" .md)"
+  if [[ "$b" > "$TODAY" ]]; then echo "$b"; fi
+done)"
+if [ -n "$future" ]; then
+  flag "future-dated log(s): $(printf '%s' "$future" | tr '\n' ' ')"
+else
+  say "  ok — no future-dated logs."
+fi
+say ""
+
+# 7. refresh watermark -----------------------------------------------------
+say "## 7. refresh watermark"
+if [ -n "${MEMORY_WATERMARK_FILE:-}" ]; then
+  if [ -f "$MEMORY_WATERMARK_FILE" ]; then
+    w="$(head -1 "$MEMORY_WATERMARK_FILE" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)"
+    if [ -n "$w" ] && [[ "$w" < "$CUTOFF" ]]; then
+      flag "watermark ($w) is stale — the refresh job may have missed runs."
+    else
+      say "  ok — watermark: ${w:-unparsed}."
+    fi
+  else
+    flag "watermark file $MEMORY_WATERMARK_FILE missing."
+  fi
+else
+  say "  skipped — MEMORY_WATERMARK_FILE not set."
+fi
+say ""
+
+if [ "$ISSUES" -eq 0 ]; then
+  echo "AUDIT RESULT: clean"
+  exit 0
+else
+  echo "AUDIT RESULT: issues found (see ! items above)"
+  exit 1
+fi

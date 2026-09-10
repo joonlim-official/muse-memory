@@ -31,52 +31,54 @@ readable.
 
 ## What it feels like
 
-Six months in, you ask about something from last spring:
+Six months in, a question about something from last spring:
 
-> **You:** "What did we decide about the home gym?"
+> **User:** "What did we decide about the home gym?"
 >
 > **Assistant:** "You ruled out the garage in March — too cold in winter,
-> and you wanted the space for the workshop. We landed on the spare room
-> with a foldable rack. That decision superseded the garage plan on
-> 2026-03-14, sourced from our planning thread. Want to revisit it?"
+> and the space was reserved for the workshop. The decision landed on the
+> spare room with a foldable rack, superseding the garage plan on
+> 2026-03-14 (sourced from the planning thread). Want to revisit it?"
 
-No hallucinated confidence. No "as an AI I don't have memory of that." The
-answer carries its own provenance — *what* changed, *when*, and *where it
-came from*.
+*(Synthetic example.)* No hallucinated confidence. No "as an AI I don't
+have memory of that." The answer carries its own provenance — *what*
+changed, *when*, and *where it came from*.
 
 ## Clear wins
 
+*(All examples below are synthetic — they show the mechanics, not anyone's
+data.)*
+
 **1. The plan that changed — without losing history.**
-Jane told her assistant in February she'd fly to Tokyo in April. In March
-she moved it to October. The trace now reads:
+A trip planned for April moves to October. The trace now reads:
 
 ```markdown
-- [travel] superseded |decision| — Japan trip moved from April to October;
+- [travel] superseded |decision| — Trip moved from April to October;
   April fares were 2x October's. Replaces the 2026-02-10 plan.
   valid_until: 2026-10-31. (src: user's message, 2026-03-02)
 ```
 
 Six months later the assistant doesn't quote the dead April plan — and if
-Jane asks "wait, didn't we say April?", the full evolution is right there.
+asked "wait, didn't we say April?", the full evolution is right there.
 
 **2. The expiry that fired on its own.**
-A trace entry carried `valid_until: 2026-05-01` on a hotel promo Jane was
-considering. The weekly audit found the date had passed, marked the entry
-`superseded`, and closed the open thread. Nobody had to remember to clean
-it up — the system did, and the log shows exactly when.
+A trace entry carries `valid_until: 2026-05-01` on a hotel promo under
+consideration. The weekly audit finds the date has passed, marks the entry
+`superseded`, and closes the open thread. Nobody has to remember to clean
+it up — the system does, and the log shows exactly when.
 
 **3. The secret that never got written.**
-Jane pasted an API key into chat while debugging. The assistant drafted a
-memory update including it; `bin/memory-guard` scanned the draft and exited
-1 — **BLOCKED: secrets detected**. The key never touched a memory file.
-Financial figures get the softer treatment: flagged for Jane's review,
+An API key gets pasted into chat during debugging. The drafted memory
+update includes it; `bin/memory-guard` scans the draft and exits 1 —
+**BLOCKED: secrets detected**. The key never touches a memory file.
+Financial figures get the softer treatment: flagged for human review,
 never auto-deleted, never silently kept.
 
 **4. The contradiction it refused to bury.**
-Jane's calendar showed a dentist appointment Tuesday; she later said "I
+The calendar shows a dentist appointment Tuesday; later the user says "I
 moved the dentist to Thursday." Instead of silently overwriting, the old
-entry was marked `superseded` with a pointer to the new one, both
-source-cited. When the Tuesday reminder confusion came up, the answer was
+entry is marked `superseded` with a pointer to the new one, both
+source-cited. When the Tuesday reminder confusion comes up, the answer is
 in the log — not in someone's faulty recollection.
 
 ## How it works

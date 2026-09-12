@@ -128,6 +128,18 @@ If you want memory-as-a-service with embeddings and managed infrastructure,
 use a memory API. If you want memory-as-files you fully own and can audit
 with `grep`, this is it.
 
+## Human-in-the-loop learning
+
+The system improves itself the way a good assistant does: it proposes,
+you judge, and your calls compound. Mechanical work (dedupe, expiry,
+format) happens silently; anything requiring judgment — a flagged
+figure, a stale fact, a proposed skill patch — arrives as one short
+message with the evidence and a recommendation. Your decision is
+recorded with what was proposed and why you chose it, and those records
+become the training signal: proposals that keep getting overruled tell
+the system its default is wrong. Reinforcement learning with a human in
+the loop, minus the neural net.
+
 ## Who it's for
 
 - **For:** people who live in an AI assistant daily and want it to

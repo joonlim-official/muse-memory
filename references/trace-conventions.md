@@ -54,7 +54,27 @@ stale (follower counts, prices) carry `as of YYYY-MM-DD` instead.
 - **Don't close on elapsed time alone.** An event closes when there is
   outcome evidence, not merely because its date passed.
 
+## Human-in-the-loop decisions (the learning signal)
+
+When the system asks the user to judge something (figure flags, stale or
+conflicting facts, proposed skill patches, spot-check verdicts), the
+user's call is recorded as a `|decision|` entry that carries the full
+signal — what was proposed, what was chosen, and why:
+
+`- [area] decision |decision| — <chosen action> (proposed: <what the system recommended>; rationale: <why the user chose it>) (src: user, YYYY-MM-DD)`
+
+These entries are the system's reward signal. Over time they teach the
+proposer what the user actually wants — proposals align with recorded
+decisions, and repeated overrules on the same question mean the system's
+default is wrong and should be patched. This is reinforcement learning
+with a human in the loop, minus the neural net: the machine proposes,
+the human judges, the decisions compound.
+
 ## What earns a trace entry
+
+Significant changes: new durable facts, corrections, completed projects,
+decisions, opened/closed threads, preference changes. Not every micro-edit —
+routine refinements are covered by the daily log.
 
 Significant changes: new durable facts, corrections, completed projects,
 decisions, opened/closed threads, preference changes. Not every micro-edit —

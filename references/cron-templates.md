@@ -22,7 +22,8 @@ Runs once a day (morning is typical). One job that:
    closes; deduplicates facts that drifted into multiple files; runs the
    `bin/memory-guard` scan; validates everything against ground truth.
    A weekly run adds a health audit (entry counts, expired items, open
-   threads older than 30 days, full guard scan).
+   threads older than 30 days, full guard scan, and a retrieval self-test
+   via `bin/memory-retrieval-test` against the installation's query file).
 
 Template body (adapt freely):
 
@@ -58,7 +59,21 @@ WORKFLOW:
    against ground truth.
 7. Update the watermark with today's date.
 8. [Optional: on one run per week, a health audit — entry counts per area,
-   expired items, open threads older than 30 days, full guard scan.]
+   expired items, open threads older than 30 days, full guard scan, and a
+   retrieval self-test: run `bin/memory-retrieval-test <query-file>` where
+   the query file (kept with the installation, not the skill) lists
+   `<query> ||| <expected-file>` lines grounded in real, stable facts.
+   A failing query means a fact drifted from its home — fix the routing,
+   don't just re-file the fact. Two weeks of failures on the same query
+   is a system problem: patch the routing table or the test. Also run 2-3
+   concept queries through semantic search by hand and confirm the right
+   page ranks — keyword retrieval is machine-testable, semantic is not.]
+
+RETRIEVAL SELF-TEST (weekly, part of the health audit): retrieval is the
+one axis the nightly `bin/memory-audit` cannot check deterministically,
+so the weekly audit covers it. Keep the query file current: when the
+memory moves a fact to a new home, update the expectation — the test
+failing after a move is the test working, not the memory breaking.
 
 CORRECTION WATCHER (recommended): when scanning recent conversations,
 watch for corrections ("no", "actually", "that's wrong", "don't") — each

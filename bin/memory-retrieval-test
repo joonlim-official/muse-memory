@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# memory-retrieval-test: retrieval self-test for the personal memory system.
+# Runs a file of sample queries against memory-grep and checks each query
+# finds its expected home. Keyword retrieval is deterministic, so it is
+# machine-testable; semantic (concept) retrieval is evaluated qualitatively
+# by the agent during the weekly audit.
+#
+# Usage: memory-retrieval-test <query-file> [memory-root]
+#   query-file: one test per line:  <query> ||| <expected-substring>
+#   lines starting with # are comments; blank lines skipped.
+#   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
+# Exit: 0 = all pass, 1 = one or more failures.
+set -u
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  echo "usage: memory-retrieval-test <query-file> [memory-root]"
+  echo "  Each line: <query> ||| <expected-substring>."
+  echo "  Checks memory-grep results contain the expected file."
+  exit 0
+fi
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+QF="${1:?usage: memory-retrieval-test <query-file> [memory-root]}"
+export PERSONAL_MEMORY_ROOT="${2:-${PERSONAL_MEMORY_ROOT:-$HOME}}"
+
+pass=0; fail=0
+echo "# memory-retrieval-test — $(date +%F)"
+echo ""
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in ''|\#*) continue ;; esac
+  q="$(printf '%s' "$line" | sed 's/ ||| .*//')"
+  exp="$(printf '%s' "$line" | sed 's/.* ||| //')"
+  [ -z "$q" ] || [ -z "$exp" ] && { echo "  SKIP (malformed): $line"; continue; }
+  out="$("$SKILL_DIR/bin/memory-grep" "$q" 0 2>/dev/null | head -60)"
+  if printf '%s' "$out" | grep -qiF "$exp"; then
+    echo "  PASS: '$q' -> found in *$exp*"
+    pass=$((pass+1))
+  else
+    echo "  FAIL: '$q' -> expected *$exp*, got:"
+    printf '%s\n' "$out" | sed 's/^/      /' | head -8
+    [ -z "$out" ] && echo "      (no results at all)"
+    fail=$((fail+1))
+  fi
+done < "$QF"
+echo ""
+echo "RESULT: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

@@ -181,6 +181,9 @@ bin/
   memory-guard      pre-write scanner: secrets block, figures get flagged
   memory-audit      nightly audit: format, expiry, stale threads, drift,
                     dating, watermark — evaluates, never writes
+  memory-retrieval-test
+                    weekly retrieval self-test: sample queries against
+                    memory-grep, checks each finds its expected home
 ```
 
 The memory itself lives outside this repo (default: the user's home

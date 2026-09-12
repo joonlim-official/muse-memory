@@ -165,6 +165,18 @@ The loop is what makes the three jobs a system rather than three chores:
 the refresh maintains the memory, the audit checks the maintenance, and
 the feedback step fixes the maintainer.
 
+HUMAN AUDITOR: the system handles mechanical fixes itself (dedupe,
+expiry, format, watermark). Anything requiring *judgment* goes to the
+user with evidence and a recommendation — the user decides, the system
+does not. That includes: figure-review flags (present what was found and
+whether it looks approved; never auto-delete), stale or contradictory
+facts (present the conflict and the proposed resolution; apply only on
+the user's word), proposed skill patches (propose, wait for go-ahead),
+and semantic spot-check verdicts (report what was checked; the user
+confirms). Record the user's decision as a `|decision|` trace entry.
+This is the backstop that keeps an autonomous memory system aligned:
+the machine does the measuring, the human does the judging.
+
 ## Notes
 
 - Give each job a stable kebab-case id and a clear title.

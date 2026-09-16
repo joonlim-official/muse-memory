@@ -5,6 +5,11 @@
 #   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
 #   Set $MEMORY_WATERMARK_FILE to also check the refresh job's watermark
 #   (installation-specific; skipped when unset).
+# Env:
+#   MEMORY_AUDIT_TZ   IANA timezone for "today" (e.g. America/Los_Angeles).
+#     "Today" is always the user's local date, never the machine's clock —
+#     a 10 PM run on a UTC machine must not read tomorrow's date.
+#     Defaults to $TZ, then UTC. Installations should set this explicitly.
 # Exit: 0 = clean, 1 = issues found, 2 = secrets found (from memory-guard).
 set -u
 
@@ -20,8 +25,9 @@ fi
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="${1:-${PERSONAL_MEMORY_ROOT:-$HOME}}"
 MEM="$ROOT/memory"
-TODAY="$(date +%F)"
-CUTOFF="$(date -d '30 days ago' +%F 2>/dev/null || date -v-30d +%F)"
+AUDIT_TZ="${MEMORY_AUDIT_TZ:-${TZ:-UTC}}"
+TODAY="$(TZ="$AUDIT_TZ" date +%F)"
+CUTOFF="$(TZ="$AUDIT_TZ" date -d '30 days ago' +%F 2>/dev/null || TZ="$AUDIT_TZ" date -v-30d +%F)"
 ISSUES=0
 
 say()  { printf '%s\n' "$*"; }
@@ -73,6 +79,14 @@ if [ -f "$MEM/trace/trace.md" ]; then
   while IFS= read -r line; do
     d="$(printf '%s' "$line" | grep -oE 'valid_until: [0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk '{print $2}')"
     if [ -n "$d" ] && [[ "$d" < "$TODAY" ]]; then
+      # retired entries stay silent: skip when a closed/superseded entry
+      # references the same area + date (the retirement, not the expiry,
+      # is the current state)
+      area="$(printf '%s' "$line" | grep -oE '^- \[[^]]+\]' | head -1)"
+      if [ -n "$area" ] && grep -F -- "$area" "$MEM/trace/trace.md" 2>/dev/null | \
+           grep -qE "(closed|superseded).*${d}|${d}.*(closed|superseded)"; then
+        continue
+      fi
       case "$line" in
         *open*|*new*|*updated*)
           flag "expired $d not retired: $(printf '%s' "$line" | cut -c1-100)"
@@ -125,7 +139,7 @@ rm -f "$tmp"
 say ""
 
 # 6. daily log dating ------------------------------------------------------
-say "## 6. daily log dating (local date: $TODAY)"
+say "## 6. daily log dating (local date: $TODAY, tz: $AUDIT_TZ)"
 if [ -f "$MEM/$TODAY.md" ]; then
   say "  ok — today's log exists."
 else

@@ -134,12 +134,21 @@ only — it never writes to memory files. Stay silent unless something
 needs the user's attention.
 
 1. Run `bin/memory-audit [memory-root]` (set $MEMORY_WATERMARK_FILE to
-   the refresh job's watermark to enable the watermark check). It checks:
+   the refresh job's watermark to enable the watermark check, and
+   $MEMORY_AUDIT_TZ to the user's IANA timezone — "today" is always the
+   user's local date, never the machine's clock). It checks:
    guard scan (secrets = exit 2, figures = exit 1 item), trace entry
-   format, expired valid_until items still open, open threads older than
+   format, expired valid_until items still open (skips entries a
+   closed/superseded entry already retired), open threads older than
    30 days, duplication drift across curated files, daily-log dating, and
    the refresh watermark. It prints a markdown report and exits 0 clean /
    1 issues / 2 secrets.
+   The figure check honors an installation-specific allowlist
+   ($MEMORY_FIGURE_ALLOWLIST, default `$MEMORY_ROOT/memory/.figure-allowlist`):
+   one fixed-string pattern per line, each a figure the human auditor has
+   already reviewed and approved. Allowlisted figures are excluded from the
+   report, so the audit only flags genuinely new figures. The auditor
+   curates this file by hand — never auto-populate it.
 2. Review the report. Secrets (exit 2) = alert the user immediately,
    naming file and line.
 

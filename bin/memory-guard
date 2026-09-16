@@ -3,6 +3,15 @@
 # Secrets are a hard block; financial figures are flagged for human review.
 # Usage: memory-guard [path ...] | memory-guard --help
 #   (default: the standard memory tree, excluding runtime-managed bank/)
+# Env:
+#   PERSONAL_MEMORY_ROOT   memory root (default: $HOME)
+#   MEMORY_FIGURE_ALLOWLIST
+#     installation-specific allowlist of known-reviewed figures, one
+#     fixed-string pattern per line (default: $ROOT/memory/.figure-allowlist).
+#     Lines matching any allowlist pattern are excluded from the figure
+#     report, so the audit only flags genuinely new figures. The human
+#     auditor curates this file: a figure lands here only after they have
+#     reviewed and approved it. Never auto-populate it.
 # Exit: 0 = clean, 1 = secrets found (BLOCK the write), 2 = figures only.
 set -u
 
@@ -41,7 +50,17 @@ else
   echo "none"
 fi
 echo "--- financial figures (review):"
-figures=$(grep -rniE -- "$FIGURE_RE" "${TARGETS[@]}" 2>/dev/null | head -20)
+figures=$(grep -rniE -- "$FIGURE_RE" "${TARGETS[@]}" 2>/dev/null || true)
+ALLOWLIST="${MEMORY_FIGURE_ALLOWLIST:-$ROOT/memory/.figure-allowlist}"
+if [ -s "$ALLOWLIST" ]; then
+  allow_tmp="$(mktemp)"
+  grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" > "$allow_tmp"
+  if [ -s "$allow_tmp" ] && [ -n "$figures" ]; then
+    figures="$(printf '%s\n' "$figures" | grep -vF -f "$allow_tmp" || true)"
+  fi
+  rm -f "$allow_tmp"
+fi
+[ -n "$figures" ] && figures="$(printf '%s\n' "$figures" | head -20)"
 if [ -n "$figures" ]; then
   printf '%s\n' "$figures"
   [ "$status" -eq 0 ] && status=2

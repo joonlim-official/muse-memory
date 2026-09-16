@@ -42,6 +42,9 @@ what is still open, and a scheduled job that collects, updates, and refines it.
   `references/trace-conventions.md`.
 - Follow `references/privacy-and-validation.md`: the approval rule, what
   never goes into memory, and the validate-against-ground-truth rule.
+- Follow `references/data-protection.md`: the three data tiers and the
+  egress rule — run `bin/memory-egress-check` on anything leaving the
+  user's private surfaces.
 
 ## Output Contract
 - Memory root contains: curated memory file, personalization notes,

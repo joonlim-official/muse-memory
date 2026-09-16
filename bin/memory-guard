@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
 # memory-guard: pre-write / audit scan for memory content.
-# Secrets are a hard block; financial figures are flagged for human review.
+# Secrets are a hard block; financial figures and personal-data patterns
+# are flagged for human review.
 # Usage: memory-guard [path ...] | memory-guard --help
 #   (default: the standard memory tree, excluding runtime-managed bank/)
 # Env:
 #   PERSONAL_MEMORY_ROOT   memory root (default: $HOME)
 #   MEMORY_FIGURE_ALLOWLIST
-#     installation-specific allowlist of known-reviewed figures, one
-#     fixed-string pattern per line (default: $ROOT/memory/.figure-allowlist).
+#     installation-specific allowlist of known-reviewed figures and
+#     personal-data strings, one fixed-string pattern per line
+#     (default: $ROOT/memory/.figure-allowlist).
 #     Lines matching any allowlist pattern are excluded from the figure
-#     report, so the audit only flags genuinely new figures. The human
-#     auditor curates this file: a figure lands here only after they have
-#     reviewed and approved it. Never auto-populate it.
-# Exit: 0 = clean, 1 = secrets found (BLOCK the write), 2 = figures only.
+#     and personal-data reports, so the audit only flags genuinely new
+#     items. The human auditor curates this file: an entry lands here only
+#     after they have reviewed and approved it. Never auto-populate it.
+# Exit: 0 = clean, 1 = secrets found (BLOCK the write),
+#       2 = figures / personal data only (flag for human review).
 set -u
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "usage: memory-guard [path ...]"
   echo "  Pre-write / audit scan for memory content."
   echo "  exit 0 = clean, 1 = secrets found (block the write),"
-  echo "  2 = financial figures only (flag for human review)."
+  echo "  2 = financial figures / personal data only (flag for human review)."
   exit 0
 fi
 
@@ -38,6 +41,10 @@ fi
 
 SECRET_RE='sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|api[_-]?key["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9_.-]{16,}|password["'"'"' ]*[:=]["'"'"' ]*[^ ]+|passwd["'"'"' ]*[:=]'
 FIGURE_RE='\B\$[0-9][0-9,]*(\.[0-9]+)?[kKmM]?\b'
+# High-precision personal-data shapes. These are review-tier (not block),
+# because legitimate non-sensitive text can match (e.g. a business support
+# line); the human auditor makes the call.
+PII_RE='\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b|\b(\+?1[-. ]?)?\(?[0-9]{3}\)?[-. ][0-9]{3}[-. ][0-9]{4}\b|\b[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}\b'
 
 status=0
 echo "--- secrets:"
@@ -65,6 +72,24 @@ if [ -n "$figures" ]; then
   printf '%s\n' "$figures"
   [ "$status" -eq 0 ] && status=2
   echo "Review: figures belong in the private dashboard/chat, not memory."
+else
+  echo "none"
+fi
+echo "--- personal data (review):"
+pii=$(grep -rniE -- "$PII_RE" "${TARGETS[@]}" 2>/dev/null || true)
+if [ -s "$ALLOWLIST" ]; then
+  allow_tmp2="$(mktemp)"
+  grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" > "$allow_tmp2"
+  if [ -s "$allow_tmp2" ] && [ -n "$pii" ]; then
+    pii="$(printf '%s\n' "$pii" | grep -vF -f "$allow_tmp2" || true)"
+  fi
+  rm -f "$allow_tmp2"
+fi
+[ -n "$pii" ] && pii="$(printf '%s\n' "$pii" | head -20)"
+if [ -n "$pii" ]; then
+  printf '%s\n' "$pii"
+  [ "$status" -eq 0 ] && status=2
+  echo "Review: SSNs, phone numbers, and card-like sequences do not belong in memory unless the user explicitly approved them."
 else
   echo "none"
 fi

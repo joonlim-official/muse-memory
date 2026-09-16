@@ -17,7 +17,8 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "usage: memory-audit [memory-root]"
   echo "  Deterministic nightly audit: guard scan, trace format, expiry,"
   echo "  stale open threads, duplication drift, daily-log dating,"
-  echo "  refresh watermark. Never writes to memory files."
+  echo "  refresh watermark, installation literals absent from skill."
+  echo "  Never writes to memory files."
   echo "  exit 0 = clean, 1 = issues found, 2 = secrets found."
   exit 0
 fi
@@ -171,6 +172,29 @@ if [ -n "${MEMORY_WATERMARK_FILE:-}" ]; then
   fi
 else
   say "  skipped — MEMORY_WATERMARK_FILE not set."
+fi
+say ""
+
+# 8. public skill free of installation-sensitive literals -------------------
+say "## 8. public skill free of installation-sensitive literals"
+DENYLIST="${MEMORY_EGRESS_DENYLIST:-$ROOT/memory/.egress-denylist}"
+if [ -s "$DENYLIST" ]; then
+  deny_tmp="$(mktemp)"
+  grep -vE '^[[:space:]]*(#|$)' "$DENYLIST" > "$deny_tmp"
+  if [ -s "$deny_tmp" ]; then
+    leak=$(grep -rF -f "$deny_tmp" "$SKILL_DIR" --exclude-dir=.git 2>/dev/null | head -5 || true)
+    if [ -n "$leak" ]; then
+      flag "installation-sensitive literals found in the public skill:"
+      printf '%s\n' "$leak" | sed 's/^/  /'
+    else
+      say "  ok — no denylisted literals in the skill repo."
+    fi
+  else
+    say "  skipped — denylist empty."
+  fi
+  rm -f "$deny_tmp"
+else
+  say "  skipped — no egress denylist configured."
 fi
 say ""
 

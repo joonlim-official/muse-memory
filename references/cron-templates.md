@@ -141,7 +141,8 @@ needs the user's attention.
    format, expired valid_until items still open (skips entries a
    closed/superseded entry already retired), open threads older than
    30 days, duplication drift across curated files, daily-log dating, and
-   the refresh watermark. It prints a markdown report and exits 0 clean /
+   the refresh watermark, and installation-sensitive literals absent from
+   the public skill repo. It prints a markdown report and exits 0 clean /
    1 issues / 2 secrets.
    The figure check honors an installation-specific allowlist
    ($MEMORY_FIGURE_ALLOWLIST, default `$MEMORY_ROOT/memory/.figure-allowlist`):

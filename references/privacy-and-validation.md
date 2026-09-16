@@ -49,8 +49,14 @@ duplicates.
 
 **Guard.** The skill ships `bin/memory-guard`: run it on new content
 before writing. Secrets are a hard block (fix first); financial figures
-are flagged for the user's review, never auto-deleted. Exit 0 = clean,
-1 = secrets found, 2 = figures only.
+and personal-data patterns (SSN shapes, phone numbers, card-like
+sequences) are flagged for the user's review, never auto-deleted. Exit
+0 = clean, 1 = secrets found, 2 = figures / personal data only.
+
+**Egress.** Nothing leaves the user's private surfaces (chat, dashboard)
+without a check: run `bin/memory-egress-check` on the draft first. See
+`references/data-protection.md` for the tier rules and the
+installation-specific denylist.
 
 ## Read discipline
 

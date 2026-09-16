@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# memory-egress-check: scan a draft before it leaves the user's private
+# surfaces (chat with the user, private dashboard).
+# Run it on anything headed somewhere less private: public commits,
+# messages sent through the user's accounts, shared artifacts, pasted
+# content. Secrets, SSNs, and card-like sequences are a hard block;
+# financial figures, phone numbers, and installation-denylisted literals
+# are flagged for human review.
+#
+# Usage: memory-egress-check [file ...]   (no args: read stdin)
+# Env:
+#   PERSONAL_MEMORY_ROOT   memory root (default: $HOME)
+#   MEMORY_EGRESS_DENYLIST
+#     installation-specific denylist of sensitive literals, one fixed
+#     string per line (default: $ROOT/memory/.egress-denylist).
+#     Curated by hand by the user — typically their street address and
+#     any other literal that must never appear outside private surfaces.
+#     Never auto-populate it, and never commit it to the public skill.
+# Exit: 0 = clean, 1 = blocked (secrets / SSN / card-like),
+#       2 = review (figures / phone / denylisted literal).
+set -u
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  echo "usage: memory-egress-check [file ...]"
+  echo "  Scan a draft before it leaves the user's private surfaces."
+  echo "  exit 0 = clean, 1 = blocked, 2 = review."
+  exit 0
+fi
+
+ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
+DENYLIST="${MEMORY_EGRESS_DENYLIST:-$ROOT/memory/.egress-denylist}"
+
+SECRET_RE='sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|api[_-]?key["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9_.-]{16,}|password["'"'"' ]*[:=]["'"'"' ]*[^ ]+|passwd["'"'"' ]*[:=]'
+BLOCK_RE='\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b|\b[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}\b'
+FIGURE_RE='\B\$[0-9][0-9,]*(\.[0-9]+)?[kKmM]?\b'
+PHONE_RE='\b(\+?1[-. ]?)?\(?[0-9]{3}\)?[-. ][0-9]{3}[-. ][0-9]{4}\b'
+
+if [ "$#" -gt 0 ]; then
+  INPUT=$(cat -- "$@" 2>/dev/null)
+else
+  INPUT=$(cat)
+fi
+
+status=0
+blocked=$(printf '%s' "$INPUT" | grep -niE -- "$SECRET_RE|$BLOCK_RE" | head -20 || true)
+if [ -n "$blocked" ]; then
+  echo "--- BLOCKED:"
+  printf '%s\n' "$blocked"
+  echo "Remove secrets, SSNs, and card-like numbers before this leaves private surfaces."
+  status=1
+fi
+
+review=$(printf '%s' "$INPUT" | grep -niE -- "$FIGURE_RE|$PHONE_RE" | head -20 || true)
+if [ -s "$DENYLIST" ]; then
+  deny_tmp="$(mktemp)"
+  grep -vE '^[[:space:]]*(#|$)' "$DENYLIST" > "$deny_tmp"
+  if [ -s "$deny_tmp" ]; then
+    denied=$(printf '%s' "$INPUT" | grep -niF -f "$deny_tmp" | head -20 || true)
+    if [ -n "$denied" ]; then
+      review="${review:+$review
+}$denied"
+    fi
+  fi
+  rm -f "$deny_tmp"
+fi
+if [ -n "$review" ]; then
+  echo "--- review:"
+  printf '%s\n' "$review"
+  echo "Figures, phone numbers, and denylisted literals need the user's approval before leaving private surfaces."
+  [ "$status" -eq 0 ] && status=2
+fi
+[ "$status" -eq 0 ] && echo "clean"
+exit "$status"

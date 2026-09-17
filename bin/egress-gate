@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# egress-gate: the hard enforcement point for the egress rule.
+#
+# Private data leaking is prevented by DEFAULT. The only places content may
+# move freely are Joon's own surfaces: his Google Drive, his Notion notes,
+# and within the Muse account (chat, memory, dashboard). Everything headed
+# anywhere else — Gmail/Messenger sends, public commits, shared artifacts,
+# Drive shares with others — passes through this gate via bin/shims.
+#
+# This script decides; the shim obeys. No agent judgment is involved in the
+# block path: exit 1 always refuses.
+#
+# Usage: egress-gate --content-file <path> --context "<desc>" [--approved]
+#   --content-file  file holding the exact outbound content to check
+#   --context       short description for the audit log (channel + recipient)
+#   --approved      Joon explicitly approved review-tier content in chat.
+#                   NEVER set this from cron/scheduled workers — they cannot
+#                   obtain approval, so review-tier content is refused there.
+# Exit: 0 = clean (or explicitly approved) — the send may proceed
+#       1 = BLOCKED — secrets/SSN/card-like content; never send
+#       2 = needs Joon's explicit approval — refused without --approved
+set -u
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+CONTENT=""; CONTEXT="outbound send"; APPROVED=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --content-file) CONTENT="${2:-}"; shift 2;;
+    --context) CONTEXT="${2:-}"; shift 2;;
+    --approved) APPROVED=1; shift;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0;;
+    *) echo "egress-gate: unknown argument: $1" >&2; exit 2;;
+  esac
+done
+[ -n "$CONTENT" ] && [ -f "$CONTENT" ] || { echo "egress-gate: --content-file <existing file> is required" >&2; exit 2; }
+
+LOG="${MOCHI_EGRESS_LOG:-$HOME/workspace/memory-sync/egress-gate.log}"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+verdict="clean"; rc=0
+detail="$("$SKILL_DIR/memory-egress-check" "$CONTENT" 2>&1)"; grc=$?
+
+if [ "$grc" -eq 1 ]; then
+  verdict="BLOCKED"; rc=1
+  {
+    echo "egress-gate BLOCKED: $CONTEXT"
+    echo "$detail"
+    echo "Private data leaking is prevented by default — this send is refused."
+  } >&2
+elif [ "$grc" -eq 2 ]; then
+  if [ "$APPROVED" -eq 1 ]; then
+    verdict="approved-override"; rc=0
+    echo "egress-gate: $CONTEXT — review-tier content sent with Joon's explicit approval (override logged)." >&2
+  else
+    verdict="needs-approval"; rc=2
+    {
+      echo "egress-gate: $CONTEXT — review-tier content needs Joon's explicit approval. Send refused."
+      echo "$detail"
+    } >&2
+  fi
+fi
+
+printf '%s | %s | %s\n' "$ts" "$CONTEXT" "$verdict" >> "$LOG"
+exit "$rc"

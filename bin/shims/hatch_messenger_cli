@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Shim over hatch_messenger_cli: send and edit pass the egress gate.
+# Reads the message text (--text-stdin via stdin, --text flag), gates it,
+# then replays stdin to the real binary only if the gate allows.
+#
+# Wiring: put this directory FIRST on PATH in every agent shell context:
+#   export PATH="$HOME/workspace/skills/personal-memory-system/bin/shims:$PATH"
+# Never invoke the real binary by absolute path to dodge the gate.
+# Approval override (Joon explicitly approved review-tier content in chat):
+#   MOCHI_EGRESS_APPROVED=1 — never set from cron/scheduled workers.
+set -u
+
+SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(cd "$SHIM_DIR/.." && pwd)"
+
+REAL="${MOCHI_REAL_HATCH_MESSENGER_CLI:-}"
+if [ -z "$REAL" ]; then
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    [ "$d" = "$SHIM_DIR" ] && continue
+    if [ -x "$d/hatch_messenger_cli" ]; then REAL="$d/hatch_messenger_cli"; break; fi
+  done <<< "${PATH//:/$'\n'}"
+fi
+[ -n "$REAL" ] || { echo "shim: real hatch_messenger_cli not found on PATH" >&2; exit 127; }
+
+pass_through() { exec "$REAL" "$@"; }
+
+case "${1:-}" in
+  send|edit)
+    # never target the companion channel thread — skill rule, kept here too
+    text=""; prev=""; ctx="messenger ${1}"; ctxprev=""
+    for a in "$@"; do
+      case "$a" in
+        --text=*) text="${a#--text=}"; prev=""; ctxprev="";;
+        --cid=*)  ctx="$ctx ${a#--cid=}"; prev=""; ctxprev="";;
+        --to=*)   ctx="$ctx to ${a#--to=}"; prev=""; ctxprev="";;
+        --text) prev=t;;
+        --cid|--to) ctxprev=c;;
+        *) [ "$prev" = "t" ] && text="$a"
+           [ "$ctxprev" = "c" ] && ctx="$ctx $a"
+           prev=""; ctxprev="";;
+      esac
+    done
+    tmp="$(mktemp)"
+    if [ ! -t 0 ]; then cat > "$tmp"; fi
+    [ -n "$text" ] && printf '\n%s\n' "$text" >> "$tmp"
+    gate_args=(--content-file "$tmp" --context "$ctx")
+    [ "${MOCHI_EGRESS_APPROVED:-0}" = "1" ] && gate_args+=(--approved)
+    if "$SKILL_DIR/egress-gate" "${gate_args[@]}"; then rc=0; else rc=$?; fi
+    if [ "$rc" -eq 0 ]; then
+      "$REAL" "$@" < "$tmp"; rc=$?
+    fi
+    rm -f "$tmp"
+    exit "$rc"
+    ;;
+esac
+
+pass_through "$@"

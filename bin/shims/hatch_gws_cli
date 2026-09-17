@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Shim over hatch_gws_cli: every Gmail SEND and every Drive share-with-others
+# passes the egress gate. Joon's own Drive / Notion / Muse account are free-
+# share zones and are NOT gated — only content leaving to someone else is.
+#
+# Wiring: put this directory FIRST on PATH in every agent shell context:
+#   export PATH="$HOME/workspace/skills/personal-memory-system/bin/shims:$PATH"
+# Never invoke the real binary by absolute path to dodge the gate.
+# Approval override (Joon explicitly approved review-tier content in chat):
+#   MOCHI_EGRESS_APPROVED=1 — never set from cron/scheduled workers.
+set -u
+
+SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(cd "$SHIM_DIR/.." && pwd)"
+
+REAL="${MOCHI_REAL_HATCH_GWS_CLI:-}"
+if [ -z "$REAL" ]; then
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    [ "$d" = "$SHIM_DIR" ] && continue
+    if [ -x "$d/hatch_gws_cli" ]; then REAL="$d/hatch_gws_cli"; break; fi
+  done <<< "${PATH//:/$'\n'}"
+fi
+[ -n "$REAL" ] || { echo "shim: real hatch_gws_cli not found on PATH" >&2; exit 127; }
+
+GATE_LOG="${MOCHI_EGRESS_LOG:-$HOME/workspace/memory-sync/egress-gate.log}"
+log_line() { printf '%s | %s | %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >> "$GATE_LOG"; }
+
+pass_through() { exec "$REAL" "$@"; }
+
+# --- drive permissions create: granting OTHERS access is never a free-share
+if [ "${1:-}" = "drive" ]; then
+  hit_perm=0; hit_create=0
+  for a in "$@"; do
+    [ "$a" = "permissions" ] && hit_perm=1
+    [ "$a" = "create" ] && hit_create=1
+  done
+  if [ "$hit_perm" -eq 1 ] && [ "$hit_create" -eq 1 ]; then
+    if [ "${MOCHI_EGRESS_APPROVED:-0}" = "1" ]; then
+      log_line "drive permissions create" "approved-override"
+      pass_through "$@"
+    fi
+    log_line "drive permissions create" "needs-approval"
+    echo "shim: sharing a Drive file with others needs Joon's explicit approval — refused." >&2
+    exit 2
+  fi
+  pass_through "$@"  # his own Drive is a free-share zone
+fi
+
+# --- gmail sends
+if [ "${1:-}" = "gmail" ]; then
+  sub="${2:-}"
+  case "$sub" in
+    +send|+reply|+forward)
+      # drafts and dry-runs never leave his account: not gated
+      for a in "$@"; do
+        case "$a" in --draft|--dry-run) pass_through "$@";; esac
+      done
+      subject=""; body=""; to=""; prev=""
+      for a in "$@"; do
+        case "$a" in
+          --subject=*) subject="${a#--subject=}"; prev="";;
+          --body=*)    body="${a#--body=}";    prev="";;
+          --to=*)      to="${a#--to=}";        prev="";;
+          --subject) prev=subj;;
+          --body)    prev=body;;
+          --to)      prev=to;;
+          *) case "$prev" in
+               subj) subject="$a";;
+               body) body="$a";;
+               to)   to="$a";;
+             esac; prev="";;
+        esac
+      done
+      tmp="$(mktemp)"
+      printf 'subject: %s\n\n%s\n' "$subject" "$body" > "$tmp"
+      gate_args=(--content-file "$tmp" --context "gmail $sub to ${to:-unknown}")
+      [ "${MOCHI_EGRESS_APPROVED:-0}" = "1" ] && gate_args+=(--approved)
+      if "$SKILL_DIR/egress-gate" "${gate_args[@]}"; then rc=0; else rc=$?; fi
+      rm -f "$tmp"
+      [ "$rc" -eq 0 ] && pass_through "$@"
+      exit "$rc"
+      ;;
+    users)
+      hit_m=0; hit_s=0
+      for a in "$@"; do
+        [ "$a" = "messages" ] && hit_m=1
+        [ "$a" = "send" ] && hit_s=1
+      done
+      if [ "$hit_m" -eq 1 ] && [ "$hit_s" -eq 1 ]; then
+        payload=""; prev=""
+        for a in "$@"; do
+          case "$a" in
+            --json=*)   payload="${a#--json=}";   prev="";;
+            --params=*) payload="${a#--params=}"; prev="";;
+            --json|--params) prev=p;;
+            *) [ "$prev" = "p" ] && { payload="$a"; prev=""; };;
+          esac
+        done
+        tmp="$(mktemp)"
+        if [ -n "$payload" ]; then
+          if ! python3 - "$payload" > "$tmp" 2>/dev/null <<'PYEOF'
+import sys, json, base64
+p = sys.argv[1]
+try:
+    d = json.loads(p)
+except Exception:
+    sys.stdout.write(p); sys.exit(0)
+raw = d.get("raw") or ""
+if raw:
+    pad = "=" * (-len(raw) % 4)
+    try:
+        sys.stdout.write(base64.urlsafe_b64decode(raw + pad).decode("utf-8", "replace"))
+    except Exception:
+        sys.stdout.write(p)
+else:
+    sys.stdout.write(p)
+PYEOF
+          then
+            printf '%s' "$payload" > "$tmp"
+          fi
+        else
+          printf '(no payload captured)' > "$tmp"
+        fi
+        gate_args=(--content-file "$tmp" --context "gmail users messages send (raw)")
+        [ "${MOCHI_EGRESS_APPROVED:-0}" = "1" ] && gate_args+=(--approved)
+        if "$SKILL_DIR/egress-gate" "${gate_args[@]}"; then rc=0; else rc=$?; fi
+        rm -f "$tmp"
+        [ "$rc" -eq 0 ] && pass_through "$@"
+        exit "$rc"
+      fi
+      pass_through "$@"
+      ;;
+  esac
+fi
+
+pass_through "$@"

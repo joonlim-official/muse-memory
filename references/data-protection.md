@@ -26,14 +26,43 @@ own private surfaces, everything is visible.
 
 ## The egress rule
 
-Before a draft leaves the private surfaces — a public commit, a message
-sent through the user's accounts, a shared artifact, pasted content —
-run it through `bin/memory-egress-check`:
+Free-share zones: Joon's Google Drive, his Notion notes, and within the
+Muse account (chat, memory, dashboard). Content moves freely between
+these. EVERYTHING else is default-deny for private data.
+
+Before a draft leaves the free-share zones — a Gmail/Messenger send, a
+public commit, a shared artifact, a Drive share with others — it passes
+the egress gate:
 
 - exit 1 (secrets, SSNs, card-like sequences) = blocked, fix first.
 - exit 2 (financial figures, phone numbers, denylisted literals) = needs
   the user's explicit approval.
 - exit 0 = clean.
+
+## Enforcement (not just documentation)
+
+`bin/shims/` shadows the send-capable CLIs (`hatch_gws_cli`,
+`hatch_messenger_cli`). Put it first on `PATH` in every agent shell
+context:
+
+  export PATH="<skill>/bin/shims:$PATH"
+
+Gmail sends (`+send`/`+reply`/`+forward`, raw `users messages send`),
+Messenger `send`/`edit`, and Drive `permissions create` are intercepted
+and run through `bin/egress-gate`, which decides: block (1), refuse
+pending approval (2), or allow (0). `--draft` and `--dry-run` are not
+sends and pass through; all other subcommands (reads, his own Drive,
+labels) are untouched. Every gate decision is appended to an audit log
+(`$MOCHI_EGRESS_LOG`, default `~/workspace/memory-sync/egress-gate.log`).
+
+`MOCHI_EGRESS_APPROVED=1` overrides a review-tier refusal — set it only
+after the user's explicit approval in chat, never from scheduled workers.
+The override is logged. Bypassing the shims via the real binaries'
+absolute paths is forbidden.
+
+Known limit: browser-task sends run on a separate VM the shims cannot
+reach — those briefs must carry the egress rule as instruction, and the
+underlying skill's send-approval rule still applies.
 
 Review-tier judgment applies to *private* information only. Public
 information — stock and market prices, public business phone numbers,

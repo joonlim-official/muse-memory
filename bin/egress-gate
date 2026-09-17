@@ -10,9 +10,10 @@
 # This script decides; the shim obeys. No agent judgment is involved in the
 # block path: exit 1 always refuses.
 #
-# Usage: egress-gate --content-file <path> --context "<desc>" [--approved]
+# Usage: egress-gate --content-file <path> --context "<desc>" [--action <word>] [--approved]
 #   --content-file  file holding the exact outbound content to check
 #   --context       short description for the audit log (channel + recipient)
+#   --action        word for messages: "send" (default) or "brief"
 #   --approved      Joon explicitly approved review-tier content in chat.
 #                   NEVER set this from cron/scheduled workers — they cannot
 #                   obtain approval, so review-tier content is refused there.
@@ -23,17 +24,23 @@ set -u
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-CONTENT=""; CONTEXT="outbound send"; APPROVED=0
+CONTENT=""; CONTEXT="outbound send"; ACTION="send"; APPROVED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --content-file) CONTENT="${2:-}"; shift 2;;
     --context) CONTEXT="${2:-}"; shift 2;;
+    --action) ACTION="${2:-}"; shift 2;;
     --approved) APPROVED=1; shift;;
     -h|--help) sed -n '2,22p' "$0"; exit 0;;
     *) echo "egress-gate: unknown argument: $1" >&2; exit 2;;
   esac
 done
 [ -n "$CONTENT" ] && [ -f "$CONTENT" ] || { echo "egress-gate: --content-file <existing file> is required" >&2; exit 2; }
+
+case "$ACTION" in
+  brief) PROCEED="this brief may be used"; REFUSE="This brief is refused.";;
+  *)     PROCEED="the send may proceed";  REFUSE="This $ACTION is refused.";;
+esac
 
 LOG="${MOCHI_EGRESS_LOG:-$HOME/workspace/memory-sync/egress-gate.log}"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
@@ -47,16 +54,16 @@ if [ "$grc" -eq 1 ]; then
   {
     echo "egress-gate BLOCKED: $CONTEXT"
     echo "$detail"
-    echo "Private data leaking is prevented by default — this send is refused."
+    echo "Private data leaking is prevented by default — $REFUSE"
   } >&2
 elif [ "$grc" -eq 2 ]; then
   if [ "$APPROVED" -eq 1 ]; then
     verdict="approved-override"; rc=0
-    echo "egress-gate: $CONTEXT — review-tier content sent with Joon's explicit approval (override logged)." >&2
+    echo "egress-gate: $CONTEXT — review-tier content, Joon's explicit approval recorded; $PROCEED (override logged)." >&2
   else
     verdict="needs-approval"; rc=2
     {
-      echo "egress-gate: $CONTEXT — review-tier content needs Joon's explicit approval. Send refused."
+      echo "egress-gate: $CONTEXT — review-tier content needs Joon's explicit approval. $REFUSE"
       echo "$detail"
     } >&2
   fi

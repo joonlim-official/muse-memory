@@ -10,7 +10,13 @@ Rules:
 
 1. **Briefs carry task context, not private data.** The objective, the
    site, the item, constraints — without the private payload.
-2. **If a step needs a private field, the agent stops and asks.**
+2. **Gate every brief before spawning.** Write the brief to a temp file
+   and run `bin/brief-gate --brief-file <f> --task "<desc>"`. Spawn only
+   on exit 0. Exit 1 (secrets/SSN/cards) = rewrite the brief, never
+   spawn. Exit 2 (figures/phones/denylisted) = get Joon's explicit
+   approval for that specific disclosure first (`--approved`), never
+   from scheduled workers. Every gate decision is audit-logged.
+3. **If a step needs a private field, the agent stops and asks.**
    Browser tasks use ask_for_information; subagents report back. The
    field is supplied for that step only — never pre-loaded "just in
    case."

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# brief-gate: run the egress check on a subagent / browser-task brief BEFORE
+# spawning. Briefs carry task context only — never Joon's private data by
+# default. This gate makes that mechanical instead of a judgment call.
+#
+# Usage: brief-gate --brief-file <path> --task "<desc>" [--approved]
+#   --brief-file  file holding the exact brief text about to be sent
+#   --task        short description for the audit log
+#   --approved    Joon explicitly approved this specific disclosure in chat.
+#                 NEVER set from cron/scheduled workers.
+# Exit: 0 = clean (or explicitly approved) — the brief may be used
+#       1 = BLOCKED — secrets/SSN/card-like content; this brief is refused
+#       2 = needs Joon's explicit approval — this brief is refused
+#
+# Workflow: write the brief to a temp file, gate it, spawn only on exit 0.
+set -u
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+BRIEF=""; TASK="delegation"; APPROVED=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --brief-file) BRIEF="${2:-}"; shift 2;;
+    --task) TASK="${2:-}"; shift 2;;
+    --approved) APPROVED=1; shift;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0;;
+    *) echo "brief-gate: unknown argument: $1" >&2; exit 2;;
+  esac
+done
+[ -n "$BRIEF" ] && [ -f "$BRIEF" ] || { echo "brief-gate: --brief-file <existing file> is required" >&2; exit 2; }
+
+args=(--action brief --content-file "$BRIEF" --context "brief:$TASK")
+[ "$APPROVED" -eq 1 ] && args+=(--approved)
+exec "$SKILL_DIR/egress-gate" "${args[@]}"

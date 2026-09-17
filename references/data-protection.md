@@ -13,8 +13,13 @@ own private surfaces, everything is visible.
 - **Memory.** Curated memory files (profile, personalization, people,
   groups, topics, trace, daily logs). May hold personal facts the user
   explicitly approved for memorization (home address, family details).
-  Never: financial figures, credentials, government IDs, account numbers.
-  `bin/memory-guard` enforces this before writes and in the audit.
+  Financial figures may live in ONE place only: the installation's finance
+  index (`MEMORY_FINANCE_INDEX`, default `~/memory/finance-index.md`) —
+  dated headline facts the user approved, refreshed from the dashboard,
+  never edited by hand to guess. Everywhere else in memory: never figures,
+  credentials, government IDs, account numbers. `bin/memory-guard`
+  enforces this before writes and in the audit — the finance index is
+  exempt from figure-flagging, but secrets still hard-block there.
 - **Private.** The conversation with the user and their private dashboard.
   Everything may appear here, including financial figures. Figures still
   do not get *promoted* from here into memory — the guard flags them.

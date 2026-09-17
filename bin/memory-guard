@@ -14,6 +14,12 @@
 #     and personal-data reports, so the audit only flags genuinely new
 #     items. The human auditor curates this file: an entry lands here only
 #     after they have reviewed and approved it. Never auto-populate it.
+#   MEMORY_FINANCE_INDEX
+#     path of the installation's finance index holding dated headline
+#     facts the user approved for memory
+#     (default: $ROOT/memory/finance-index.md). Figure-flagging skips
+#     this file; secrets still hard-block and personal-data review
+#     still applies.
 # Exit: 0 = clean, 1 = secrets found (BLOCK the write),
 #       2 = figures / personal data only (flag for human review).
 set -u
@@ -27,6 +33,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 fi
 
 ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
+FINANCE_INDEX="${MEMORY_FINANCE_INDEX:-$ROOT/memory/finance-index.md}"
 
 if [ "$#" -gt 0 ]; then
   TARGETS=("$@")
@@ -57,7 +64,16 @@ else
   echo "none"
 fi
 echo "--- financial figures (review):"
-figures=$(grep -rniE -- "$FIGURE_RE" "${TARGETS[@]}" 2>/dev/null || true)
+# The finance index holds user-approved dated headline facts — exclude it
+# from the figure scan (by target and by output prefix, belt and braces).
+FIGURE_TARGETS=()
+for t in "${TARGETS[@]}"; do
+  [ "$t" = "$FINANCE_INDEX" ] || FIGURE_TARGETS+=("$t")
+done
+figures=""
+if [ "${#FIGURE_TARGETS[@]}" -gt 0 ]; then
+  figures=$(grep -rnHiE -- "$FIGURE_RE" "${FIGURE_TARGETS[@]}" 2>/dev/null || true)
+fi
 ALLOWLIST="${MEMORY_FIGURE_ALLOWLIST:-$ROOT/memory/.figure-allowlist}"
 if [ -s "$ALLOWLIST" ]; then
   allow_tmp="$(mktemp)"
@@ -68,6 +84,10 @@ if [ -s "$ALLOWLIST" ]; then
   rm -f "$allow_tmp"
 fi
 [ -n "$figures" ] && figures="$(printf '%s\n' "$figures" | head -20)"
+# The finance index holds user-approved dated headline facts — not a leak.
+if [ -n "$figures" ]; then
+  figures="$(printf '%s\n' "$figures" | grep -vF -e "$FINANCE_INDEX:" || true)"
+fi
 if [ -n "$figures" ]; then
   printf '%s\n' "$figures"
   [ "$status" -eq 0 ] && status=2

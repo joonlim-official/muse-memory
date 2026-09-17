@@ -64,6 +64,15 @@ Known limit: browser-task sends run on a separate VM the shims cannot
 reach — those briefs must carry the egress rule as instruction, and the
 underlying skill's send-approval rule still applies.
 
+## Briefing subagents — need-to-know
+
+Subagents and browser-task agents receive ONLY the context needed for
+the specific task — never private data by default. If a step needs a
+private field, the agent stops and asks; the field is supplied for that
+step only. Purchases never carry payment details in the brief. The full
+policy and the standard paragraph to include verbatim in every brief
+live in `references/subagent-briefing.md`.
+
 Review-tier judgment applies to *private* information only. Public
 information — stock and market prices, public business phone numbers,
 published prices, anything anyone could look up — is not sensitive and

@@ -29,6 +29,11 @@ fi
 
 ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
 DENYLIST="${MEMORY_EGRESS_DENYLIST:-$ROOT/memory/.egress-denylist}"
+# Public literals (e.g. business phone numbers Joon ruled public) that must
+# never be gated. One per line; digit-normalized before comparison, so
+# formatting variants all match. This NEVER weakens the BLOCK tier above —
+# it only exempts matches from the review tier below.
+ALLOWLIST="${MEMORY_EGRESS_ALLOWLIST:-$ROOT/memory/.egress-allowlist}"
 
 SECRET_RE='sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|api[_-]?key["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9_.-]{16,}|password["'"'"' ]*[:=]["'"'"' ]*[^ ]+|passwd["'"'"' ]*[:=]'
 BLOCK_RE='\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b|\b[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}\b'
@@ -50,7 +55,31 @@ if [ -n "$blocked" ]; then
   status=1
 fi
 
-review=$(printf '%s' "$INPUT" | grep -niE -- "$FIGURE_RE|$PHONE_RE" | head -20 || true)
+review_input="$INPUT"
+if [ -s "$ALLOWLIST" ]; then
+  allow_tmp="$(mktemp)"
+  grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | tr -cd '0-9\n' | grep -E '[0-9]{7,}' > "$allow_tmp" || true
+  if [ -s "$allow_tmp" ]; then
+    norm() { # strip leading 1 from 11-digit US numbers
+      local d="$1"
+      if [ "${#d}" -eq 11 ] && [ "${d:0:1}" = "1" ]; then d="${d:1}"; fi
+      printf '%s' "$d"
+    }
+    allow_norm="$(mktemp)"
+    while IFS= read -r a; do norm "$a"; echo; done < "$allow_tmp" | sort -u > "$allow_norm"
+    phone_matches="$(printf '%s' "$review_input" | grep -oE -- "$PHONE_RE" || true)"
+    while IFS= read -r m; do
+      [ -z "$m" ] && continue
+      md="$(norm "$(printf '%s' "$m" | tr -cd '0-9')")"
+      if grep -qx -- "$md" "$allow_norm" 2>/dev/null; then
+        review_input="${review_input//"$m"/}"
+      fi
+    done <<< "$phone_matches"
+    rm -f "$allow_norm"
+  fi
+  rm -f "$allow_tmp"
+fi
+review=$(printf '%s' "$review_input" | grep -niE -- "$FIGURE_RE|$PHONE_RE" | head -20 || true)
 if [ -s "$DENYLIST" ]; then
   deny_tmp="$(mktemp)"
   grep -vE '^[[:space:]]*(#|$)' "$DENYLIST" > "$deny_tmp"

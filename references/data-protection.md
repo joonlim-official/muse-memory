@@ -30,6 +30,12 @@ run it through `bin/memory-egress-check`:
   the user's explicit approval.
 - exit 0 = clean.
 
+Review-tier judgment applies to *private* information only. Public
+information — stock and market prices, public business phone numbers,
+published prices, anything anyone could look up — is not sensitive and
+never needs the user's permission. Do not escalate it; handle it
+mechanically.
+
 ## Installation-specific lists
 
 Two hand-curated files live with the installation, never in the public

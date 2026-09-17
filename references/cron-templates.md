@@ -82,7 +82,16 @@ and record what the correction teaches about the user's preferences.
 
 DATING DISCIPLINE: the daily log filename is always the user's *local*
 date (`YYYY-MM-DD` in their timezone), never UTC. A run that crosses
-midnight still files under the date the user experienced.
+midnight still files under the date the user experienced. Make it
+unmissable — every writer job resolves the date explicitly up front:
+
+  LOG_DATE="$(TZ="$MEMORY_AUDIT_TZ" date +%F)"   # never bare `date +%F`
+
+with `MEMORY_AUDIT_TZ` set to the user's IANA timezone, and uses
+`$LOG_DATE` for every daily-log write. The machine clock is UTC on most
+hosts; a bare `date` silently files entries under the wrong day.
+`bin/memory-audit` check #6 flags future-dated logs as the backstop —
+detection is the audit's job, prevention is the writer's.
 
 WATERMARKS: each job owns its watermark file (ISO date or datetime, one
 value, no prose). The refresh job and the watcher use *separate* watermark

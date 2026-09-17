@@ -65,3 +65,6 @@ what is still open, and a scheduled job that collects, updates, and refines it.
 3. Uncertain items are marked as such, never asserted.
 4. Keep installation-specific details (account names, CLI commands, schedule
    times) in the local cron bodies and operating notes, not in this skill.
+5. Validate the privacy protections with the muse-leakage-guard add-on after
+   any change to the protection layer, and re-run its audit on a schedule —
+   a protection nobody re-tests is a protection nobody has.

@@ -246,6 +246,30 @@ and flags financial figures on every write.
 See [references/privacy-and-validation.md](references/privacy-and-validation.md)
 and [SECURITY.md](SECURITY.md).
 
+## Add-ons
+
+**[muse-leakage-guard](https://github.com/joonlim-official/muse-leakage-guard)** —
+the validation add-on for this skill's privacy protections. It proves the
+leakage controls actually work instead of trusting that they do:
+
+- `bin/leakage-audit` — installation integrity, red-team gate tests with
+  synthetic payloads (nothing real is ever sent), attack-surface coverage,
+  gate audit-log review, and an explicit residual-risk report.
+- `references/attack-surface.md` — a catalog of 21 leakage scenarios, each
+  with a verdict (protected / approval-gated / policy-only / open gap) and
+  the details behind it.
+
+Install it next to your memory skill and point it at your installation:
+
+```bash
+git clone https://github.com/joonlim-official/muse-leakage-guard.git
+cd muse-leakage-guard
+PERSONAL_MEMORY_SKILL=/path/to/your/memory-skill bin/leakage-audit
+```
+
+Run the audit after any change to the protection layer — and on a schedule.
+A protection nobody re-tests is a protection nobody has.
+
 ## Contributing
 
 Small, focused PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).

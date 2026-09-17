@@ -1,14 +1,20 @@
 ---
 name: "personal_memory_system"
-description: "Set up and operate a durable personal memory for an AI assistant: organized facts by person and topic, a temporal trace of what changed, search tooling, and a scheduled collect/update/refine job."
+description: "Set up and operate a durable personal memory for an AI assistant: memory scanning, retrieval, management, indexing, organization, and evolution — with a built-in data-protection layer, validated by the muse-leakage-guard add-on."
 ---
 
 # Personal Memory System
 
 ## Purpose
-Give an AI assistant a long-term memory that stays organized, searchable, and
-current: curated facts by topic and person, a temporal log of what changed and
-what is still open, and a scheduled job that collects, updates, and refines it.
+Give an AI assistant a long-term memory that stays organized, searchable,
+and current. The skill covers the full lifecycle: **scanning** (collecting
+from the user's surfaces), **retrieval** (searching before answering),
+**management** (routing each fact to its home), **indexing** (people,
+groups, topics), **organization** (curated files plus an append-only
+temporal trace), **evolution** (scheduled collect/update/refine and
+evaluation), and **protection** (a data-protection layer — egress gates,
+send shims, briefing policy — validated by the muse-leakage-guard
+add-on).
 
 ## Workflow
 

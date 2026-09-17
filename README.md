@@ -128,6 +128,29 @@ If you want memory-as-a-service with embeddings and managed infrastructure,
 use a memory API. If you want memory-as-files you fully own and can audit
 with `grep`, this is it.
 
+## Self-improvement, on a schedule
+
+The system doesn't just maintain your memory — it maintains itself. A
+nightly evaluation job runs the full validation loop and gets better
+every cycle:
+
+- **Memory health** — `bin/memory-audit`: format, expiry, stale threads,
+  duplication drift, watermark.
+- **Leakage performance** — the leakage-guard audit plus the adversarial
+  corpus: every detector must return the right verdict on every payload.
+- **Coverage** — every attack-surface scenario has a test; a scenario
+  without one is a finding.
+- **The loop** — each finding is classified as an *instance* problem (fix
+  the data) or a *system* problem (fix the skill). System problems are
+  patched, re-validated, committed, and reported — automatically. The
+  loop closes when a night goes clean because the system got better, not
+  because symptoms were hand-fixed again.
+
+See [references/agentic-improvement.md](references/agentic-improvement.md)
+for the methodology. The weekly adversarial pass grows the test corpus
+with new evasion shapes drawn from real usage — the tests only get
+harder.
+
 ## Human-in-the-loop learning
 
 The system improves itself the way a good assistant does: it proposes,
@@ -191,11 +214,20 @@ bin/
   init-memory       create the directory skeleton (idempotent)
   memory-grep       keyword search across the memory tree (exact identifiers)
   memory-guard      pre-write scanner: secrets block, figures get flagged
+  memory-egress-check
+                    the detector: scans outbound drafts — secrets/SSN/cards
+                    block (exit 1), figures/phones/denylisted literals need
+                    approval (exit 2), clean passes (exit 0)
+  egress-gate       hard enforcement point: wraps the check with audit
+                    logging and the approval-override path
+  brief-gate        runs the egress check on subagent briefs before spawning
   memory-audit      nightly audit: format, expiry, stale threads, drift,
                     dating, watermark — evaluates, never writes
   memory-retrieval-test
                     weekly retrieval self-test: sample queries against
                     memory-grep, checks each finds its expected home
+  shims/            PATH-shadowing wrappers that route outbound CLI calls
+                    through the egress gate
 ```
 
 The memory itself lives outside this repo (default: the user's home
@@ -254,20 +286,26 @@ leakage controls actually work instead of trusting that they do:
 
 - `bin/leakage-audit` — installation integrity, red-team gate tests with
   synthetic payloads (nothing real is ever sent), attack-surface coverage,
-  gate audit-log review, and an explicit residual-risk report.
+  gate audit-log review, and an explicit residual-risk report. Every
+  failure ships with a suggested remediation.
+- `bin/adversarial-run` — detection performance: 36+ synthetic payloads
+  (new secret formats, evasion shapes, false-positive traps) against the
+  gates, each with an expected verdict. Precision/recall you can re-run.
 - `references/attack-surface.md` — a catalog of 21 leakage scenarios, each
   with a verdict (protected / approval-gated / policy-only / open gap) and
-  the details behind it.
+  the details behind it. The README illustrates every scenario with
+  synthetic examples.
 
 Install it next to your memory skill and point it at your installation:
 
 ```bash
 git clone https://github.com/joonlim-official/muse-leakage-guard.git
 cd muse-leakage-guard
-PERSONAL_MEMORY_SKILL=/path/to/your/memory-skill bin/leakage-audit
+cp local.env.example local.env   # set PERSONAL_MEMORY_SKILL to your skill path
+bin/leakage-audit && bin/adversarial-run
 ```
 
-Run the audit after any change to the protection layer — and on a schedule.
+Run both after any change to the protection layer — and on a schedule.
 A protection nobody re-tests is a protection nobody has.
 
 ## Contributing

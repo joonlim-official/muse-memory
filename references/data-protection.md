@@ -79,9 +79,56 @@ published prices, anything anyone could look up — is not sensitive and
 never needs the user's permission. Do not escalate it; handle it
 mechanically.
 
+## Validation
+
+A protection nobody re-tests is a protection nobody has. The companion
+`muse-leakage-guard` add-on red-teams this layer: synthetic secrets,
+figures, phones, and denylisted literals through the real gates, shim
+interception checks, and a public-repo egress scan. Re-run it after any
+change to this layer.
+
+Last validation, 2026-09-17:
+
+- **Real-data verification: 9/9 checks passed.** The user's actual data
+  formats — real financial figures, home address, email, public business
+  numbers — were fed through the real `egress-gate` and `brief-gate`.
+  Tier-2 items were correctly refused pending approval; Tier-3 public
+  items passed clean. The report carries verdicts only; every real value
+  was shredded after the run, and the harness lives outside the public
+  repos, never committed.
+- **Finding → fixed.** One check caught a public business number the user
+  had ruled public being approval-gated anyway. Fix: the `.egress-allowlist`
+  above. Full audit re-run after the fix: **47 passed, 0 failed, CLEAN**.
+- **Open.** Tier-1 live secrets/SSN were not tested against real values —
+  the installer holds none in any store the test can see, which is correct.
+  They can be checked on demand: any value through `memory-egress-check`
+  must print BLOCKED and exit 1.
+
+## Known residuals
+
+Stated openly, not hidden. These are the paths the layer does not
+mechanically close today:
+
+1. **Absolute-path shim bypass** — the shims only intercept bare CLI
+   names on `PATH`; invoking the real binaries by absolute path dodges
+   the gate. Forbidden by policy, not by mechanism.
+2. **Browser-task VM** — browser tasks run on a separate VM the shims
+   cannot reach. Their briefs carry the egress rule as instruction, and
+   the underlying skill's send-approval rule still applies, but there is
+   no automatic interception there.
+3. **Transcript inheritance** — generic subagents inherit the parent's
+   transcript, which the brief gate cannot redact. Briefs forbid using
+   inherited personal data for external disclosure; browser agents get
+   only the brief, which is the stronger boundary.
+4. **Binary attachments** — attachment contents are not inspected before
+   sends; only the surrounding text passes the gate.
+5. **Public pushes** — depend on the egress check running before push;
+   enforced by workflow discipline plus the audit's public-repo scan, not
+   by a push hook.
+
 ## Installation-specific lists
 
-Two hand-curated files live with the installation, never in the public
+Three hand-curated files live with the installation, never in the public
 skill repo:
 
 - `.figure-allowlist` — figures and personal-data strings the user already
@@ -89,5 +136,12 @@ skill repo:
 - `.egress-denylist` — sensitive literals (street address, etc.) that must
   never appear outside private surfaces; the egress check flags them and
   the audit verifies the public skill repo contains none of them.
+- `.egress-allowlist` — public literals the user ruled not private
+  (e.g. public business phone numbers). Entries are digit-normalized, so
+  every formatting variant matches, and they are exempted from the
+  **review tier only** (figures/phones). The **block tier** — secrets,
+  SSNs, card numbers — is never exempted; the allowlist cannot weaken it.
 
-Both are curated by the user alone. Nothing auto-populates them.
+All three are curated by the user alone. Nothing auto-populates them.
+Public-vs-private classification happens before any escalation: public
+information is handled mechanically and never gated.

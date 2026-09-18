@@ -14,6 +14,15 @@
 #     and personal-data reports, so the audit only flags genuinely new
 #     items. The human auditor curates this file: an entry lands here only
 #     after they have reviewed and approved it. Never auto-populate it.
+#   MEMORY_PUBLIC_PATTERNS
+#     installation-specific public literal CLASSES the auditor ruled public
+#     (e.g. market-price quotes whose values change daily, so fixed strings
+#     cannot cover them), one ERE pattern per line
+#     (default: $ROOT/memory/.public-patterns).
+#     Lines matching any valid pattern are excluded from the figure and
+#     personal-data reports (review tier only). The BLOCK tier above is
+#     computed before this and is never affected. Invalid patterns are
+#     skipped. Never auto-populate it.
 #   MEMORY_FINANCE_INDEX
 #     path of the installation's finance index holding dated headline
 #     facts the user approved for memory
@@ -86,6 +95,30 @@ if [ -s "$ALLOWLIST" ]; then
   fi
   rm -f "$allow_tmp"
 fi
+# Public literal CLASSES the auditor ruled public (MEMORY_PUBLIC_PATTERNS,
+# default $ROOT/memory/.public-patterns; one ERE per line, # comments).
+# Review-tier reports below exclude lines matching any valid pattern. The
+# secrets BLOCK above ran on the raw targets and is never affected.
+# Invalid patterns are skipped.
+_load_public_patterns() {
+  local pubpat="${MEMORY_PUBLIC_PATTERNS:-$ROOT/memory/.public-patterns}"
+  [ -s "$pubpat" ] || return 0
+  local pp_tmp rc
+  pp_tmp="$(mktemp)"
+  while IFS= read -r pp || [ -n "$pp" ]; do
+    case "$pp" in \#*|'') continue;; esac
+    grep -qE -- "$pp" /dev/null 2>/dev/null
+    rc=$?
+    [ "$rc" -ne 2 ] && printf '%s\n' "$pp" >> "$pp_tmp"
+  done < "$pubpat"
+  [ -s "$pp_tmp" ] && printf '%s' "$pp_tmp" || rm -f "$pp_tmp"
+}
+PP_FILE="$(_load_public_patterns)"
+_exclude_public() { # stdin -> stdout minus lines matching public patterns
+  if [ -n "${PP_FILE:-}" ]; then grep -vE -f "$PP_FILE" || true
+  else cat; fi
+}
+[ -n "$figures" ] && figures="$(printf '%s\n' "$figures" | _exclude_public)"
 [ -n "$figures" ] && figures="$(printf '%s\n' "$figures" | head -20)"
 # The finance index holds user-approved dated headline facts — not a leak.
 if [ -n "$figures" ]; then
@@ -108,7 +141,9 @@ if [ -s "$ALLOWLIST" ]; then
   fi
   rm -f "$allow_tmp2"
 fi
+[ -n "$pii" ] && pii="$(printf '%s\n' "$pii" | _exclude_public)"
 [ -n "$pii" ] && pii="$(printf '%s\n' "$pii" | head -20)"
+[ -n "${PP_FILE:-}" ] && rm -f "$PP_FILE"
 if [ -n "$pii" ]; then
   printf '%s\n' "$pii"
   [ "$status" -eq 0 ] && status=2

@@ -79,6 +79,24 @@ An iteration is done when, in order:
 
 ## History
 
+- 2026-09-17 (night): second iteration — over-gating fix for auditor-ruled
+  public classes. The nightly audit kept flagging MU stock prices and two
+  public business numbers Joon had ruled public that same day
+  ('don't ask me for my permission for all public information'), because
+  fixed-string allowlists cannot cover values that change daily. Added
+  `MEMORY_PUBLIC_PATTERNS` (`~/memory/.public-patterns`, one ERE per line,
+  auditor-curated, never auto-populated): `memory-guard` and
+  `memory-egress-check` now exempt matching lines from the review tier
+  only; the block tier (secrets/SSN/cards) is computed first and never
+  affected. Seeded with `MU ~\$[0-9,]+(\.[0-9]+)?`; the two phone numbers
+  and the published `$1,600 PT` went to `.figure-allowlist` as fixed
+  strings (already in `.egress-allowlist`). 4 new controlled tests in
+  `leakage-audit` (pattern exempts / pattern never exempts secrets, on
+  both gates); residual note added for the line-scoped caveat. Validation:
+  bash -n clean, leakage-audit CLEAN 94/94, adversarial-run 36/36,
+  memory-audit clean. Corpus not extended: market-price clean cases are
+  installation-dependent (they need the installation's pattern file), and
+  the shared corpus must stay installation-independent.
 - 2026-09-17: first full iteration. Adversarial corpus built (36
   cases); found 7 detection gaps — Stripe `sk_live_/sk_test_` keys,
   Google `AIza` keys, JWT-shaped tokens, `api key` with a space, bare

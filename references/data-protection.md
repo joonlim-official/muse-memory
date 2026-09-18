@@ -128,7 +128,7 @@ mechanically close today:
 
 ## Installation-specific lists
 
-Three hand-curated files live with the installation, never in the public
+Four hand-curated files live with the installation, never in the public
 skill repo:
 
 - `.figure-allowlist` — figures and personal-data strings the user already
@@ -141,7 +141,13 @@ skill repo:
   every formatting variant matches, and they are exempted from the
   **review tier only** (figures/phones). The **block tier** — secrets,
   SSNs, card numbers — is never exempted; the allowlist cannot weaken it.
+- `.public-patterns` — public literal *classes* the user ruled public as a
+  class (one ERE pattern per line), for rulings fixed strings cannot cover
+  because the values change — e.g. a stock-price quote in a daily market
+  watch. `memory-guard` and `memory-egress-check` exempt matching lines
+  from the review tier only; the block tier is computed before any
+  exemption and is never affected. Invalid patterns are skipped.
 
-All three are curated by the user alone. Nothing auto-populates them.
+All four are curated by the user alone. Nothing auto-populates them.
 Public-vs-private classification happens before any escalation: public
 information is handled mechanically and never gated.

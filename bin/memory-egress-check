@@ -34,6 +34,12 @@ DENYLIST="${MEMORY_EGRESS_DENYLIST:-$ROOT/memory/.egress-denylist}"
 # formatting variants all match. This NEVER weakens the BLOCK tier above —
 # it only exempts matches from the review tier below.
 ALLOWLIST="${MEMORY_EGRESS_ALLOWLIST:-$ROOT/memory/.egress-allowlist}"
+# Public literal CLASSES the auditor ruled public (e.g. market-price quotes
+# whose values change daily, so fixed strings cannot cover them), one ERE
+# pattern per line (default: $ROOT/memory/.public-patterns). Lines matching
+# any valid pattern are dropped from the REVIEW tier below. The BLOCK tier
+# above ran on the raw input and is never affected. Invalid patterns are
+# skipped. Never auto-populate it.
 
 SECRET_RE='sk-[A-Za-z0-9]{20,}|sk_(live|test)_[A-Za-z0-9]{10,}|AIza[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_.-]{20,}|AKIA[0-9A-Z]{16}|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|api[ _-]?key["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9_.-]{16,}|password["'"'"' ]*[:=]["'"'"' ]*[^ ]+|passwd["'"'"' ]*[:=]'
 BLOCK_RE='\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b|\b[0-9]{9}\b|\b3[47][0-9]{2}[- ]?[0-9]{6}[- ]?[0-9]{5}\b|\b[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}\b'
@@ -82,6 +88,20 @@ if [ -s "$ALLOWLIST" ]; then
     rm -f "$allow_norm"
   fi
   rm -f "$allow_tmp"
+fi
+# Public literal CLASSES the auditor ruled public
+# (MEMORY_PUBLIC_PATTERNS, default $ROOT/memory/.public-patterns).
+# Lines matching any valid pattern leave the REVIEW tier here.
+PUBPATTERNS="${MEMORY_PUBLIC_PATTERNS:-$ROOT/memory/.public-patterns}"
+if [ -s "$PUBPATTERNS" ]; then
+  pp_tmp="$(mktemp)"
+  while IFS= read -r pp || [ -n "$pp" ]; do
+    case "$pp" in \#*|'') continue;; esac
+    grep -qE -- "$pp" /dev/null 2>/dev/null
+    [ "$?" -ne 2 ] && printf '%s\n' "$pp" >> "$pp_tmp"
+  done < "$PUBPATTERNS"
+  [ -s "$pp_tmp" ] && review_input="$(printf '%s' "$review_input" | grep -vE -f "$pp_tmp" || true)"
+  rm -f "$pp_tmp"
 fi
 review=$(printf '%s' "$review_input" | grep -niE -- "$FIGURE_RE|$PHONE_RE" | head -20 || true)
 if [ -s "$DENYLIST" ]; then

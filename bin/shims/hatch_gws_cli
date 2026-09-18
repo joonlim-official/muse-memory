@@ -52,13 +52,20 @@ if [ "${1:-}" = "gmail" ]; then
   sub="${2:-}"
   case "$sub" in
     +send|+reply|+forward)
-      # drafts and dry-runs never leave his account: not gated
-      for a in "$@"; do
-        case "$a" in --draft|--dry-run) pass_through "$@";; esac
-      done
-      subject=""; body=""; to=""; prev=""
+      # Parse first: --draft/--dry-run mean "stays in his account" only in
+      # flag position. As the VALUE of --subject/--body/--to (token confusion)
+      # they are gated content, not a draft marker.
+      subject=""; body=""; to=""; prev=""; is_draft=0
       for a in "$@"; do
         case "$a" in
+          --draft|--dry-run)
+            if [ -z "$prev" ]; then is_draft=1; else
+              case "$prev" in
+                subj) subject="$a";;
+                body) body="$a";;
+                to)   to="$a";;
+              esac; prev=""
+            fi;;
           --subject=*) subject="${a#--subject=}"; prev="";;
           --body=*)    body="${a#--body=}";    prev="";;
           --to=*)      to="${a#--to=}";        prev="";;
@@ -72,6 +79,8 @@ if [ "${1:-}" = "gmail" ]; then
              esac; prev="";;
         esac
       done
+      # drafts and dry-runs never leave his account: not gated
+      [ "$is_draft" -eq 1 ] && pass_through "$@"
       tmp="$(mktemp)"
       printf 'subject: %s\n\n%s\n' "$subject" "$body" > "$tmp"
       gate_args=(--content-file "$tmp" --context "gmail $sub to ${to:-unknown}")
@@ -88,7 +97,7 @@ if [ "${1:-}" = "gmail" ]; then
         [ "$a" = "send" ] && hit_s=1
       done
       if [ "$hit_m" -eq 1 ] && [ "$hit_s" -eq 1 ]; then
-        payload=""; prev=""
+        payload=""; prev=""; stdin_tmp=""
         for a in "$@"; do
           case "$a" in
             --json=*)   payload="${a#--json=}";   prev="";;
@@ -97,9 +106,23 @@ if [ "${1:-}" = "gmail" ]; then
             *) [ "$prev" = "p" ] && { payload="$a"; prev=""; };;
           esac
         done
+        # Resolve payload indirection. '-' means stdin; an empty payload with
+        # piped stdin also means the message comes from stdin: capture it now
+        # so the gate inspects the exact bytes the real binary will receive,
+        # then replay them. '@path' reads a file. Anything unresolvable fails
+        # closed — we never gate a placeholder while the real bytes go through.
+        case "$payload" in
+          ""|-) if [ -t 0 ]; then payload=""; else stdin_tmp="$(mktemp)"; cat > "$stdin_tmp"; payload="$(cat "$stdin_tmp")"; fi;;
+          @*) pf="${payload#@}"; if [ -r "$pf" ]; then payload="$(cat "$pf")"; else payload=""; fi;;
+        esac
+        if [ -z "$payload" ]; then
+          log_line "gmail users messages send (raw)" "refused: payload not capturable"
+          rm -f "$stdin_tmp"
+          echo "shim: could not capture the message payload for egress review — refused." >&2
+          exit 1
+        fi
         tmp="$(mktemp)"
-        if [ -n "$payload" ]; then
-          if ! python3 - "$payload" > "$tmp" 2>/dev/null <<'PYEOF'
+        if ! python3 - "$payload" > "$tmp" 2>/dev/null <<'PYEOF'
 import sys, json, base64
 p = sys.argv[1]
 try:
@@ -116,17 +139,21 @@ if raw:
 else:
     sys.stdout.write(p)
 PYEOF
-          then
-            printf '%s' "$payload" > "$tmp"
-          fi
-        else
-          printf '(no payload captured)' > "$tmp"
+        then
+          printf '%s' "$payload" > "$tmp"
         fi
         gate_args=(--content-file "$tmp" --context "gmail users messages send (raw)")
         [ "${MOCHI_EGRESS_APPROVED:-0}" = "1" ] && gate_args+=(--approved)
         if "$SKILL_DIR/egress-gate" "${gate_args[@]}"; then rc=0; else rc=$?; fi
         rm -f "$tmp"
-        [ "$rc" -eq 0 ] && pass_through "$@"
+        if [ "$rc" -eq 0 ]; then
+          if [ -n "$stdin_tmp" ]; then
+            "$REAL" "$@" < "$stdin_tmp"; rc=$?
+          else
+            pass_through "$@"
+          fi
+        fi
+        rm -f "$stdin_tmp"
         exit "$rc"
       fi
       pass_through "$@"

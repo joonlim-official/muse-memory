@@ -67,6 +67,15 @@ elif [ "$grc" -eq 2 ]; then
       echo "$detail"
     } >&2
   fi
+elif [ "$grc" -ne 0 ]; then
+  # FAIL CLOSED: any abnormal detector exit (crash, usage error, missing
+  # interpreter, signal death) is NOT a verdict. A broken detector must
+  # never read as "clean" — refuse rather than allow.
+  verdict="detector-error"; rc=1
+  {
+    echo "egress-gate: $CONTEXT — detector exited abnormally (rc=$grc); failing closed. $REFUSE"
+    echo "$detail"
+  } >&2
 fi
 
 printf '%s | %s | %s\n' "$ts" "$CONTEXT" "$verdict" >> "$LOG"

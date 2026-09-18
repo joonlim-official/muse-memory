@@ -51,15 +51,20 @@ fi
 if [ "${1:-}" = "gmail" ]; then
   sub="${2:-}"
   case "$sub" in
-    +send|+reply|+forward)
+    +send|+reply|+reply-all|+forward)
       # Parse first: --draft/--dry-run mean "stays in his account" only in
       # flag position. As the VALUE of --subject/--body/--to (token confusion)
       # they are gated content, not a draft marker.
-      subject=""; body=""; to=""; prev=""; is_draft=0
+      # A literal "--" ends option parsing: anything after it is positional
+      # and the real CLI may still interpret it as content, so every
+      # post-"--" argument is gated as body (fail-safe over the parser
+      # ambiguity).
+      subject=""; body=""; to=""; prev=""; is_draft=0; ddash=0
       for a in "$@"; do
         case "$a" in
+          --) ddash=1; prev="";;
           --draft|--dry-run)
-            if [ -z "$prev" ]; then is_draft=1; else
+            if [ -z "$prev" ] && [ "$ddash" -eq 0 ]; then is_draft=1; else
               case "$prev" in
                 subj) subject="$a";;
                 body) body="$a";;
@@ -76,7 +81,10 @@ if [ "${1:-}" = "gmail" ]; then
                subj) subject="$a";;
                body) body="$a";;
                to)   to="$a";;
-             esac; prev="";;
+             esac
+             # post-"--" positionals are gated as body (see above)
+             if [ "$ddash" -eq 1 ]; then body="${body:+$body }$a"; fi
+             prev="";;
         esac
       done
       # drafts and dry-runs never leave his account: not gated
@@ -91,6 +99,78 @@ if [ "${1:-}" = "gmail" ]; then
       exit "$rc"
       ;;
     users)
+      # drafts send: draft creation is deliberately ungated (drafts never
+      # leave his account), so a draft may contain anything — the send step
+      # must be gated like any other send. The draft body is fetched
+      # read-only from the real CLI and gated before the send proceeds.
+      hit_drafts=0; hit_dsend=0
+      for a in "$@"; do
+        [ "$a" = "drafts" ] && hit_drafts=1
+        [ "$a" = "send" ] && hit_dsend=1
+      done
+      if [ "$hit_drafts" -eq 1 ] && [ "$hit_dsend" -eq 1 ]; then
+        if [ "${MOCHI_EGRESS_APPROVED:-0}" = "1" ]; then
+          log_line "gmail users drafts send" "approved-override"
+          pass_through "$@"
+        fi
+        # Gate the draft's actual content: fetch it read-only first.
+        did=""; prev=""
+        for a in "$@"; do
+          case "$a" in
+            --params=*) did="$(printf '%s' "${a#--params=}" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"; prev="";;
+            --json=*)   did="$(printf '%s' "${a#--json=}"   | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"; prev="";;
+            --params|--json) prev=p;;
+            *) [ "$prev" = "p" ] && { did="$(printf '%s' "$a" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"; prev=""; };;
+          esac
+        done
+        tmp="$(mktemp)"; draft_raw="$(mktemp)"
+        if [ -n "$did" ] && "$REAL" users drafts get --params "{\"id\":\"$did\",\"format\":\"full\"}" > "$draft_raw" 2>/dev/null; then
+          # Decode any base64 MIME bodies inside the draft response so the gate
+          # inspects the actual message text, not opaque blobs. Regex scan
+          # (not JSON parsing) so malformed responses still get decoded.
+          python3 - "$draft_raw" > "$tmp" 2>/dev/null <<'PYEOF'
+import sys, base64, re
+p = open(sys.argv[1]).read()
+out = [p]
+for m in re.finditer(r'[A-Za-z0-9+/=_-]{16,}', p):
+    s = m.group(0)
+    try:
+        pad = "=" * (-len(s) % 4)
+        out.append(base64.urlsafe_b64decode(s + pad).decode("utf-8", "replace"))
+    except Exception:
+        pass
+sys.stdout.write("\n".join(out))
+PYEOF
+          if [ ! -s "$tmp" ]; then cp "$draft_raw" "$tmp"; fi
+          gate_args=(--content-file "$tmp" --context "gmail users drafts send (draft content)")
+          if "$SKILL_DIR/egress-gate" "${gate_args[@]}"; then rc=0; else rc=$?; fi
+        else
+          # Cannot resolve the draft body: fail closed — never send blind.
+          log_line "gmail users drafts send" "refused: draft body not resolvable"
+          rc=1
+        fi
+        rm -f "$tmp" "$draft_raw"
+        if [ "$rc" -eq 0 ]; then pass_through "$@"; fi
+        exit "$rc"
+      fi
+      # settings-plane mutations (auto-forwarding, delegates, filters)
+      # redirect where his mail goes: approval-gated like Drive shares.
+      hit_settings=0; hit_mut=0
+      for a in "$@"; do
+        [ "$a" = "settings" ] && hit_settings=1
+        case "$a" in
+          updateAutoForwarding|delegates|filters|sendAs) hit_mut=1;;
+        esac
+      done
+      if [ "$hit_settings" -eq 1 ] && [ "$hit_mut" -eq 1 ]; then
+        if [ "${MOCHI_EGRESS_APPROVED:-0}" = "1" ]; then
+          log_line "gmail users settings mutation" "approved-override"
+          pass_through "$@"
+        fi
+        log_line "gmail users settings mutation" "needs-approval"
+        echo "shim: changing Gmail forwarding/delegate/filter settings needs Joon's explicit approval — refused." >&2
+        exit 2
+      fi
       hit_m=0; hit_s=0
       for a in "$@"; do
         [ "$a" = "messages" ] && hit_m=1
@@ -122,25 +202,37 @@ if [ "${1:-}" = "gmail" ]; then
           exit 1
         fi
         tmp="$(mktemp)"
-        if ! python3 - "$payload" > "$tmp" 2>/dev/null <<'PYEOF'
+        # Decode the MIME before gating. Undecodable input (bad JSON, bad
+        # base64) or a missing python3 is REFUSED — we never gate opaque
+        # bytes the detector cannot match and then send them anyway.
+        if ! command -v python3 >/dev/null 2>&1; then
+          log_line "gmail users messages send (raw)" "refused: python3 unavailable for MIME decode"
+          rm -f "$stdin_tmp" "$tmp"
+          echo "shim: cannot decode the message payload safely — refused." >&2
+          exit 1
+        fi
+        python3 - "$payload" > "$tmp" 2>/dev/null <<'PYEOF'
 import sys, json, base64
 p = sys.argv[1]
 try:
     d = json.loads(p)
 except Exception:
-    sys.stdout.write(p); sys.exit(0)
+    sys.exit(3)  # undecodable JSON: refuse, never gate opaque bytes
 raw = d.get("raw") or ""
 if raw:
     pad = "=" * (-len(raw) % 4)
     try:
         sys.stdout.write(base64.urlsafe_b64decode(raw + pad).decode("utf-8", "replace"))
     except Exception:
-        sys.stdout.write(p)
+        sys.exit(3)  # bad base64: refuse
 else:
     sys.stdout.write(p)
 PYEOF
-        then
-          printf '%s' "$payload" > "$tmp"
+        if [ $? -ne 0 ]; then
+          log_line "gmail users messages send (raw)" "refused: payload not decodable"
+          rm -f "$tmp" "$stdin_tmp"
+          echo "shim: the message payload is not decodable — refused." >&2
+          exit 1
         fi
         gate_args=(--content-file "$tmp" --context "gmail users messages send (raw)")
         [ "${MOCHI_EGRESS_APPROVED:-0}" = "1" ] && gate_args+=(--approved)

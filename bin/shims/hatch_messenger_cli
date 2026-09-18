@@ -26,17 +26,21 @@ fi
 pass_through() { exec "$REAL" "$@"; }
 
 case "${1:-}" in
-  send|edit)
+  send|edit|marketplace)
     # never target the companion channel thread — skill rule, kept here too
-    text=""; prev=""; ctx="messenger ${1}"; ctxprev=""
+    # A literal "--" ends option parsing; post-"--" positionals may still be
+    # interpreted as message content by the real CLI, so they are gated too.
+    text=""; prev=""; ctx="messenger ${1}"; ctxprev=""; ddash=0
     for a in "$@"; do
       case "$a" in
+        --) ddash=1; prev=""; ctxprev="";;
         --text=*) text="${a#--text=}"; prev=""; ctxprev="";;
         --cid=*)  ctx="$ctx ${a#--cid=}"; prev=""; ctxprev="";;
         --to=*)   ctx="$ctx to ${a#--to=}"; prev=""; ctxprev="";;
         --text) prev=t;;
         --cid|--to) ctxprev=c;;
         *) [ "$prev" = "t" ] && text="$a"
+           [ "$ddash" = "1" ] && text="${text:+$text }$a"
            [ "$ctxprev" = "c" ] && ctx="$ctx $a"
            prev=""; ctxprev="";;
       esac

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# memory-log-append — append to today's daily memory log, dated correctly.
+#
+# Computes the log filename from the user's LOCAL date exactly once, so
+# writers never hand-compute it. (Bare `date +%F` on a UTC host silently
+# files entries under the wrong day — the recurring misfiling class the
+# nightly evaluation repaired by hand four times in three days before this
+# helper existed.)
+#
+# Usage:
+#   memory-log-append [file ...]   # no args: read from stdin
+#
+# Env:
+#   MEMORY_LOG_ROOT   memory root dir (default: $HOME/memory)
+#   MEMORY_LOG_TZ     IANA timezone for the local date
+#                     (default: America/Los_Angeles)
+#
+# A job that spans local midnight should capture the printed path from its
+# first call and keep appending to that file for the rest of the run.
+#
+# Prints the log file path it appended to.
+set -u
+
+ROOT="${MEMORY_LOG_ROOT:-$HOME/memory}"
+TZ_NAME="${MEMORY_LOG_TZ:-America/Los_Angeles}"
+LOG_DATE="$(TZ="$TZ_NAME" date +%F)"
+LOG_FILE="$ROOT/$LOG_DATE.md"
+
+mkdir -p "$ROOT"
+if [ ! -e "$LOG_FILE" ]; then
+  : > "$LOG_FILE"
+elif [ -s "$LOG_FILE" ]; then
+  # Separate the new block from prior content with a blank line.
+  [ -z "$(tail -c 1 "$LOG_FILE")" ] || printf '\n' >> "$LOG_FILE"
+  printf '\n' >> "$LOG_FILE"
+fi
+
+if [ "$#" -gt 0 ]; then
+  cat -- "$@" >> "$LOG_FILE"
+else
+  cat >> "$LOG_FILE"
+fi
+# Leave the file newline-terminated.
+[ -z "$(tail -c 1 "$LOG_FILE")" ] || printf '\n' >> "$LOG_FILE"
+
+printf '%s\n' "$LOG_FILE"

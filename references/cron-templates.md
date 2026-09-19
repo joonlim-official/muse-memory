@@ -91,7 +91,10 @@ with `MEMORY_AUDIT_TZ` set to the user's IANA timezone, and uses
 `$LOG_DATE` for every daily-log write. The machine clock is UTC on most
 hosts; a bare `date` silently files entries under the wrong day.
 `bin/memory-audit` check #6 flags future-dated logs as the backstop —
-detection is the audit's job, prevention is the writer's.
+detection is the audit's job, prevention is the writer's. Prefer
+`bin/memory-log-append` (stdin or file args) over hand-rolled `LOG_DATE`
+entirely — the helper resolves the local date once, correctly, so there is
+no date expression for a writer to get wrong.
 
 WATERMARKS: each job owns its watermark file (ISO date or datetime, one
 value, no prose). The refresh job and the watcher use *separate* watermark

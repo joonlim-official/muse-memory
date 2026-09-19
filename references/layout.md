@@ -17,7 +17,9 @@ All paths are relative to the memory root (`$PERSONAL_MEMORY_ROOT`, default
 ~/memory/trace/ + INDEX.md    Append-only temporal log, newest first.
                              Top = latest knowledge; deeper = history.
 ~/memory/YYYY-MM-DD.md        Raw daily logs. Day-to-day detail that didn't
-                             make the cut for curated files.
+                             make the cut for curated files. Writers append
+                             via `bin/memory-log-append` — never hand-compute
+                             the filename (UTC hosts misfile).
 ~/memory/bank/               Runtime-managed reflections (if the platform
                              provides them). Readable; do not edit directly.
 <central-profile>            One document describing the user (+ household),

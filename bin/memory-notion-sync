@@ -16,6 +16,10 @@
 #   NOTION_GUARD_BIN — memory-guard path (default: <skill>/bin/memory-guard)
 #   NOTION_TZ        — IANA timezone for snapshot titles (default: America/Los_Angeles)
 #
+# NOTION_SYNC_FAKE_TRANSPORT=1 uses an in-memory Notion stand-in instead of
+# the live API (tests only — never for real syncs). NOTION_SYNC_FAKE_FILE
+# optionally persists that fake across processes for multi-command tests.
+#
 # Exit codes: 0 success / clean, 1 sync not fully applied (nothing written),
 # 2 operational failure. The weekly backup cron must stop on any nonzero exit.
 set -euo pipefail

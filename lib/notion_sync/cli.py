@@ -10,7 +10,9 @@ Subcommands:
 Exit codes:
     0  success (sync fully applied, or status clean)
     1  sync could not be fully applied (conflict, hold, block, deletion,
-       or error) — nothing was written; resolve and re-run
+       or error) — nothing was written; resolve and re-run.
+       init also returns 1 when an existing page's content differs and
+       needs human resolution (neither side touched).
     2  operational failure (config, transport, conversion, write)
 """
 
@@ -22,7 +24,8 @@ import sys
 from . import __version__
 from .config import load_config, ConfigError
 from .engine import Engine, SyncError, default_guard_check
-from .transport import NotionTransport, TransportError
+from .transport import (NotionTransport, TransportError,
+                        FakeNotionTransport)
 
 
 def _build_engine(args):
@@ -31,7 +34,18 @@ def _build_engine(args):
     except ConfigError as e:
         print(f"notion-sync: configuration error: {e}", file=sys.stderr)
         raise SystemExit(2)
-    transport = NotionTransport(cfg.api_key, cfg.api_base, cfg.api_version)
+    if os.environ.get("NOTION_SYNC_FAKE_TRANSPORT") == "1":
+        # Tests only: in-memory Notion stand-in, no network or credentials.
+        # NOTION_SYNC_FAKE_FILE optionally persists it across processes so
+        # multi-command CLI sequences can be tested end to end.
+        transport = FakeNotionTransport(
+            persist_path=os.environ.get("NOTION_SYNC_FAKE_FILE") or None)
+        transport.pages.setdefault(
+            cfg.hub_id,
+            {"title": "Hub", "archived": False, "blocks": []})
+        transport._save()
+    else:
+        transport = NotionTransport(cfg.api_key, cfg.api_base, cfg.api_version)
     guard = default_guard_check(cfg.guard_bin)
     if getattr(args, "no_guard", False):
         guard = lambda text: 0  # noqa: E731 — tests / emergencies only
@@ -114,6 +128,7 @@ def cmd_restore(args):
     print(f"byte-identical={report['byte_identical']} "
           f"equivalent={report['equivalent']} "
           f"mismatches={len(report['mismatches'])} "
+          f"snapshot-only={len(report['snapshot_only'])} "
           f"live-only={len(report['live_only'])}")
     for rel, reason in report["mismatches"]:
         print(f"  mismatch: {rel}: {reason}")

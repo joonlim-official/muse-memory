@@ -9,6 +9,7 @@ page tree and is what the test suite uses — no credentials required.
 """
 
 import json
+import os
 import time
 import urllib.request
 import urllib.error
@@ -313,9 +314,21 @@ class NotionTransport:
         return blocks
 
     def replace_blocks(self, page_id, blocks):
-        """Delete all non-child_page blocks, then append the new tree."""
+        """Delete all non-child_page blocks, then append the new tree.
+
+        Full-page replacement: block IDs change, so per-block comments or
+        history on the old blocks are not preserved; child pages are kept
+        (deleting a child_page block would trash the subpage). When the
+        canonical content is unchanged this is a no-op — no API calls.
+        """
+        from . import markdown as md
         existing = self._paginate(
             "GET", f"/v1/blocks/{page_id}/children", None, "results")
+        try:
+            if md.canonical(notion_to_blocks(existing)) == md.canonical(blocks):
+                return
+        except Exception:
+            pass  # on any comparison failure, fall through to replacement
         for b in existing:
             if b.get("type") == "child_page":
                 continue  # deleting a child_page trashes the subpage
@@ -358,17 +371,46 @@ class NotionTransport:
 # ---------------------------------------------------------------------------
 
 class FakeNotionTransport:
-    """In-memory Notion stand-in with the same interface as NotionTransport."""
+    """In-memory Notion stand-in with the same interface as NotionTransport.
 
-    def __init__(self):
+    `persist_path` optionally saves the page tree to a JSON file after every
+    mutation, so separate CLI processes can share one fake (used by the
+    end-to-end CLI tests).
+    """
+
+    def __init__(self, persist_path=None):
         self.pages = {}          # id -> {"title", "archived", "blocks"}
         self.children = {}       # parent_id -> [child page ids]
         self._next = 0
-        self.fail_on = None      # method name to fail with TransportError
+        self.fail_on = None      # method name to fail with TransportError,
+                                 # or (method, n) to fail on the nth call
+        self.calls = {}          # method name -> call count
+        self.replaced = 0        # replace_blocks calls that actually replaced
+        self._persist_path = persist_path
+        if persist_path and os.path.exists(persist_path):
+            with open(persist_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.pages = data.get("pages", {})
+            self.children = data.get("children", {})
+            self._next = data.get("next", 0)
+
+    def _save(self):
+        if not self._persist_path:
+            return
+        tmp = self._persist_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"pages": self.pages, "children": self.children,
+                       "next": self._next}, f)
+        os.replace(tmp, self._persist_path)
 
     def _maybe_fail(self, name):
+        self.calls[name] = self.calls.get(name, 0) + 1
         if self.fail_on == name:
             raise TransportError(f"injected failure in {name}")
+        if (isinstance(self.fail_on, tuple) and self.fail_on[0] == name
+                and self.calls[name] == self.fail_on[1]):
+            raise TransportError(
+                f"injected failure in {name} (call {self.calls[name]})")
 
     def _new_id(self):
         self._next += 1
@@ -396,11 +438,13 @@ class FakeNotionTransport:
         pid = self._new_id()
         self.pages[pid] = {"title": title, "archived": False, "blocks": []}
         self.children.setdefault(parent_id, []).append(pid)
+        self._save()
         return pid
 
     def archive_page(self, page_id):
         self._maybe_fail("archive_page")
         self.pages[page_id]["archived"] = True
+        self._save()
 
     def list_child_pages(self, parent_id):
         self._maybe_fail("list_child_pages")
@@ -424,13 +468,24 @@ class FakeNotionTransport:
     def replace_blocks(self, page_id, blocks):
         self._maybe_fail("replace_blocks")
         import copy
+        from . import markdown as md
         # store Notion API format, mirroring what the live transport sends,
         # so notion_to_blocks() round-trips correctly in pull_remote().
-        self.pages[page_id]["blocks"] = copy.deepcopy(
-            blocks_to_notion(blocks))
+        new_api = copy.deepcopy(blocks_to_notion(blocks))
+        try:
+            old_api = self.pages[page_id]["blocks"]
+            if (md.canonical(notion_to_blocks(old_api))
+                    == md.canonical(notion_to_blocks(new_api))):
+                return  # no-op: canonically identical, like the live transport
+        except Exception:
+            pass
+        self.pages[page_id]["blocks"] = new_api
+        self.replaced += 1
+        self._save()
 
     def append_blocks(self, page_id, blocks):
         self._maybe_fail("append_blocks")
         import copy
         self.pages[page_id]["blocks"].extend(
             copy.deepcopy(blocks_to_notion(blocks)))
+        self._save()

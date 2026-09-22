@@ -69,7 +69,8 @@ An opt-in, stdlib-only Python component (`lib/notion_sync/`,
 - Every successful sync also writes a dated recovery snapshot page.
 - Three-way reconciliation (base vs local vs remote): simultaneous edits
   are **conflicts — both versions preserved, neither overwritten**; the sync
-  writes nothing until the whole plan is actionable (all-or-nothing).
+  writes nothing until the whole plan is actionable, and a failed apply
+  rolls back every completed step (all-or-nothing).
 - Deletions are never destructive: an archived Notion page is reported,
   the local file is kept.
 - Full contract in `references/notion-sync.md`. Synthetic tests:

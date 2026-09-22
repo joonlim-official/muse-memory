@@ -6,6 +6,7 @@ All fixture content is synthetic and impersonal.
 
 import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -452,3 +453,354 @@ def test_validate_adoption_relpath():
     assert ok is None and err
     ok, err = validate_adoption_relpath("memory/bogus/x.md", "/mem")
     assert ok is None and err
+    # hardened policy cases
+    ok, err = validate_adoption_relpath("memory/bank/secret.md", "/mem")
+    assert ok is None and "runtime-managed" in err
+    ok, err = validate_adoption_relpath("memory/2026-09-22.md", "/mem")
+    assert ok is None and "daily logs" in err
+    ok, err = validate_adoption_relpath("memory/people/INDEX.md", "/mem")
+    assert ok is None and "reserved" in err
+    ok, err = validate_adoption_relpath("memory/.hidden/x.md", "/mem")
+    assert ok is None and "hidden" in err
+    ok, err = validate_adoption_relpath(
+        "memory/people/Jane-Doe.md", "/mem",
+        existing_rels={"memory/people/jane-doe.md"})
+    assert ok is None and "collides" in err
+
+
+# ---------------------------------------------------------------------------
+# rollback: failed apply leaves nothing half-written
+# ---------------------------------------------------------------------------
+
+def test_apply_rolls_back_partial_pulls(tmp_path, monkeypatch):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    write_mem(cfg, "memory/people/jane-doe.md", "# Jane\n")
+    engine.init()
+    for rel, new in (("MEMORY.md", "# Memory\n\nR1.\n"),
+                     ("memory/people/jane-doe.md", "# Jane\n\nR2.\n")):
+        transport.replace_blocks(engine.state.pages[rel],
+                                 md.parse_markdown(new))
+    plan, local_files, remote = engine.plan()
+    assert plan.actionable() and len(plan.pull) == 2
+    calls = {"n": 0}
+    orig_write = engine._write_local
+
+    def flaky(abs_p, text):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("injected write failure")
+        return orig_write(abs_p, text)
+
+    monkeypatch.setattr(engine, "_write_local", flaky)
+    with pytest.raises(OSError):
+        engine.apply(plan, local_files, remote)
+    # the first pull was rolled back: both files keep pre-apply content
+    assert read_mem(cfg, "MEMORY.md") == "# Memory\n"
+    assert read_mem(cfg, "memory/people/jane-doe.md") == "# Jane\n"
+    assert engine.state.snapshots == {}
+    assert engine.state.read_base("MEMORY.md") == "# Memory\n"
+
+
+def test_apply_rolls_back_partial_pushes(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    write_mem(cfg, "EXTRA.md", "# Extra\n")
+    engine.init()
+    write_mem(cfg, "MEMORY.md", "# Memory\n\nL1.\n")
+    write_mem(cfg, "EXTRA.md", "# Extra\n\nL2.\n")
+    plan, local_files, remote = engine.plan()
+    assert plan.actionable() and len(plan.push) == 2
+    transport.calls.clear()
+    transport.fail_on = ("replace_blocks", 2)  # fail on the 2nd push only
+    with pytest.raises(tp.TransportError):
+        engine.apply(plan, local_files, remote)
+    transport.fail_on = None
+    # the first push was rolled back: remote still has the old content
+    pid = engine.state.pages["MEMORY.md"]
+    blocks = tp.notion_to_blocks(transport.get_blocks(pid))
+    assert md.blocks_to_markdown(blocks) == "# Memory\n"
+    assert read_mem(cfg, "MEMORY.md") == "# Memory\n\nL1.\n"
+    assert engine.state.snapshots == {}
+
+
+def test_apply_rolls_back_adopt_and_snapshot(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    write_mem(cfg, "memory/people/INDEX.md",
+              "# People\n\n- **Jane** — `memory/people/jane.md` — x\n")
+    engine.init()
+    pid = transport.create_page("hub-1", "memory/people/john.md")
+    transport.replace_blocks(pid, md.parse_markdown("# John\n"))
+    transport.calls.clear()
+    transport.fail_on = ("create_page", 1)  # snapshot creation fails
+    from notion_sync.engine import SyncError
+    with pytest.raises(SyncError, match="apply failed"):
+        engine.sync()
+    transport.fail_on = None
+    # adopted file removed, INDEX.md restored, mapping dropped, no snapshot
+    assert not os.path.exists(os.path.join(cfg.memory_root,
+                                            "memory/people/john.md"))
+    assert read_mem(cfg, "memory/people/INDEX.md") == \
+        "# People\n\n- **Jane** — `memory/people/jane.md` — x\n"
+    assert "memory/people/john.md" not in engine.state.pages
+    assert engine.state.snapshots == {}
+
+
+# ---------------------------------------------------------------------------
+# adoption: INDEX.md updates + hardened routing
+# ---------------------------------------------------------------------------
+
+def test_adopt_updates_index_md(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    write_mem(cfg, "memory/people/INDEX.md",
+              "# People\n\n- **Jane Doe** — `memory/people/jane-doe.md` — test\n")
+    write_mem(cfg, "memory/people/jane-doe.md", "# Jane Doe\n")
+    engine.init()
+    pid = transport.create_page("hub-1", "memory/people/john-smith.md")
+    transport.replace_blocks(pid, md.parse_markdown("# John Smith\n"))
+    code, report = engine.sync()
+    assert code == 0
+    assert report["adopted"] == ["memory/people/john-smith.md"]
+    assert report["index_updated"] == ["memory/people/john-smith.md"]
+    idx = read_mem(cfg, "memory/people/INDEX.md")
+    assert idx.count("`memory/people/john-smith.md`") == 1  # one entry
+
+
+def test_adopt_without_index_is_reported(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    engine.init()
+    pid = transport.create_page("hub-1", "memory/topics/lonely.md")
+    transport.replace_blocks(pid, md.parse_markdown("# Lonely\n"))
+    code, report = engine.sync()
+    assert code == 0
+    assert report["adopted"] == ["memory/topics/lonely.md"]
+    assert report["index_missing"] == ["memory/topics/lonely.md"]
+
+
+def test_adopt_bank_rejected(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    engine.init()
+    pid = transport.create_page("hub-1", "memory/bank/sneaky.md")
+    transport.replace_blocks(pid, md.parse_markdown("sneaky\n"))
+    code, report = engine.sync()
+    assert code == 1
+    assert any("runtime-managed" in e[1] for e in report["errors"])
+    assert not os.path.exists(
+        os.path.join(cfg.memory_root, "memory/bank/sneaky.md"))
+
+
+def test_adopt_case_collision_rejected(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    write_mem(cfg, "memory/people/jane-doe.md", "# Jane\n")
+    engine.init()
+    pid = transport.create_page("hub-1", "memory/people/JANE-DOE.md")
+    transport.replace_blocks(pid, md.parse_markdown("# Other Jane\n"))
+    code, report = engine.sync()
+    assert code == 1
+    assert any("collides" in e[1] for e in report["errors"])
+
+
+# ---------------------------------------------------------------------------
+# init: existing pages are compared, never silently clobbered
+# ---------------------------------------------------------------------------
+
+def test_init_existing_empty_page_seeds(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    transport.create_page("hub-1", "MEMORY.md")  # empty page, no blocks
+    code, report = engine.init()
+    assert code == 0
+    assert report["seeded_existing"] == ["MEMORY.md"]
+    pid = engine.state.pages["MEMORY.md"]
+    blocks = tp.notion_to_blocks(transport.get_blocks(pid))
+    assert md.blocks_to_markdown(blocks) == "# Memory\n"
+
+
+def test_init_existing_equal_page_adopts_without_rewrite(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    pid = transport.create_page("hub-1", "MEMORY.md")
+    transport.replace_blocks(pid, md.parse_markdown("# Memory\n"))
+    replaced_before = transport.replaced
+    code, report = engine.init()
+    assert code == 0
+    assert report["adopted_existing"] == ["MEMORY.md"]
+    assert transport.replaced == replaced_before  # nothing rewritten
+
+
+def test_init_existing_differing_page_is_mismatch(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    pid = transport.create_page("hub-1", "MEMORY.md")
+    transport.replace_blocks(pid, md.parse_markdown("# Other\n"))
+    code, report = engine.init()
+    assert code == 1
+    assert report["content_mismatch"] == ["MEMORY.md"]
+    assert "MEMORY.md" not in engine.state.pages
+    # neither side clobbered
+    assert read_mem(cfg, "MEMORY.md") == "# Memory\n"
+    blocks = tp.notion_to_blocks(transport.get_blocks(pid))
+    assert md.blocks_to_markdown(blocks) == "# Other\n"
+
+
+# ---------------------------------------------------------------------------
+# replace_blocks: canonical no-op
+# ---------------------------------------------------------------------------
+
+def test_replace_blocks_noop_when_canonically_identical(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    engine.init()
+    pid = engine.state.pages["MEMORY.md"]
+    replaced_before = transport.replaced
+    # canonically identical (trailing blank-line style differs only)
+    transport.replace_blocks(pid, md.parse_markdown("# Memory\n\n\n"))
+    assert transport.replaced == replaced_before
+    # genuinely different content still replaces
+    transport.replace_blocks(pid, md.parse_markdown("# Changed\n"))
+    assert transport.replaced == replaced_before + 1
+
+
+# ---------------------------------------------------------------------------
+# restore: exact per-category accounting
+# ---------------------------------------------------------------------------
+
+def test_restore_accounting_exact(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    write_mem(cfg, "MEMORY.md", "# Memory\n")
+    write_mem(cfg, "memory/people/jane-doe.md", "# Jane Doe\n")
+    # double blank line: Notion round-trip normalizes it away
+    write_mem(cfg, "memory/people/john-smith.md", "# John Smith\n\n\nBody.\n")
+    write_mem(cfg, "memory/people/temp.md", "# Temp\n")
+    engine.init()
+    code, report = engine.sync()
+    assert code == 0
+    snap_id = report["snapshot_page_id"]
+    # mismatch: genuinely different content
+    write_mem(cfg, "MEMORY.md", "CORRUPTED\n")
+    # snapshot_only: delete the live file after the snapshot
+    os.remove(os.path.join(cfg.memory_root, "memory/people/temp.md"))
+    # live_only: new file created after the snapshot
+    write_mem(cfg, "memory/people/brand-new.md", "# Brand New\n")
+    staging = str(tmp_path / "staging")
+    rpt = engine.restore(snap_id, staging)
+    assert rpt["total"] == 4
+    assert rpt["byte_identical"] == 1          # jane-doe.md
+    assert rpt["equivalent"] == 1              # john-smith.md (blanks)
+    assert rpt["mismatches"] == [("MEMORY.md", "content differs")]
+    assert rpt["snapshot_only"] == ["memory/people/temp.md"]
+    assert rpt["live_only"] == ["memory/people/brand-new.md"]
+    with open(os.path.join(staging, "memory/people/jane-doe.md")) as f:
+        assert f.read() == "# Jane Doe\n"
+
+
+# ---------------------------------------------------------------------------
+# CLI end to end through bin/memory-notion-sync (fake transport on disk)
+# ---------------------------------------------------------------------------
+
+def _cli_env(tmp_path):
+    mem = tmp_path / "climem"
+    mem.mkdir(exist_ok=True)
+    env = dict(os.environ)
+    env.update({
+        "NOTION_SYNC_MEMORY_ROOT": str(mem),
+        "NOTION_API_KEY": "test-key",
+        "NOTION_HUB_ID": "hub-1",
+        "NOTION_STATE_DIR": str(tmp_path / "clistate"),
+        "NOTION_SYNC_FAKE_TRANSPORT": "1",
+        "NOTION_SYNC_FAKE_FILE": str(tmp_path / "fake.json"),
+    })
+    return env, mem
+
+
+def _run_cli(env, *argv):
+    bin_path = os.path.join(os.path.dirname(__file__), "..", "bin",
+                            "memory-notion-sync")
+    return subprocess.run([bin_path, "--no-guard", *argv],
+                          capture_output=True, text=True, env=env,
+                          timeout=120)
+
+
+def _remote_edit_fake(env, rel, new_text):
+    """Edit a page's blocks directly in the persisted fake transport."""
+    fake_path = env["NOTION_SYNC_FAKE_FILE"]
+    with open(fake_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    pid = next((_id for _id, p in data["pages"].items()
+                if p["title"] == rel and not p["archived"]), None)
+    assert pid, f"no live page titled {rel}"
+    data["pages"][pid]["blocks"] = tp.blocks_to_notion(
+        md.parse_markdown(new_text))
+    tmp = fake_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp, fake_path)
+
+
+def test_cli_init_sync_status(tmp_path):
+    env, mem = _cli_env(tmp_path)
+    (mem / "MEMORY.md").write_text("# Memory\n")
+    p = _run_cli(env, "init")
+    assert p.returncode == 0, p.stderr
+    p = _run_cli(env, "status")
+    assert p.returncode == 0, p.stderr
+    assert "clean=1" in p.stdout
+    p = _run_cli(env, "sync", "--json")
+    assert p.returncode == 0, p.stderr
+    body = json.loads(p.stdout)
+    assert body["plan"]["clean"] == 1
+
+
+def test_cli_conflict_exit_1(tmp_path):
+    env, mem = _cli_env(tmp_path)
+    (mem / "MEMORY.md").write_text("# Memory\n")
+    assert _run_cli(env, "init").returncode == 0
+    assert _run_cli(env, "sync").returncode == 0
+    (mem / "MEMORY.md").write_text("# Memory\n\nLocal edit.\n")
+    _remote_edit_fake(env, "MEMORY.md", "# Memory\n\nNotion edit.\n")
+    p = _run_cli(env, "sync")
+    assert p.returncode == 1, p.stderr + p.stdout
+    assert "conflicts" in p.stdout
+    # neither side overwritten
+    assert (mem / "MEMORY.md").read_text() == "# Memory\n\nLocal edit.\n"
+
+
+def test_cli_config_error_exit_2(tmp_path):
+    env, _mem = _cli_env(tmp_path)
+    del env["NOTION_API_KEY"]
+    p = _run_cli(env, "status")
+    assert p.returncode == 2
+    assert "configuration error" in p.stderr
+
+
+def test_cli_restore_end_to_end(tmp_path):
+    env, mem = _cli_env(tmp_path)
+    (mem / "MEMORY.md").write_text("# Memory\n")
+    assert _run_cli(env, "init").returncode == 0
+    p = _run_cli(env, "sync", "--json")
+    assert p.returncode == 0, p.stderr
+    snap_id = json.loads(p.stdout)["snapshot_page_id"]
+    assert snap_id
+    (mem / "MEMORY.md").write_text("CORRUPTED\n")
+    staging = str(tmp_path / "staging")
+    p = _run_cli(env, "restore", snap_id, staging)
+    # exit 1: the restore completed but one file genuinely mismatches
+    assert p.returncode == 1, p.stderr + p.stdout
+    assert "byte-identical=0" in p.stdout
+    assert "mismatches=1" in p.stdout
+    with open(os.path.join(staging, "MEMORY.md")) as f:
+        assert f.read() == "# Memory\n"
+    # live file untouched by restore
+    assert (mem / "MEMORY.md").read_text() == "CORRUPTED\n"
+
+
+def test_cli_version_through_wrapper(tmp_path):
+    env, _mem = _cli_env(tmp_path)
+    p = _run_cli(env, "version")
+    assert p.returncode == 0
+    assert "notion-sync" in p.stdout

@@ -32,13 +32,27 @@ human-friendly editing surface.
   first. If anything is a conflict, hold, block, deletion, or error, **nothing
   is written** — no local files, no Notion edits, no snapshot, no state
   advancement. Only a fully actionable plan is applied, in order: pull →
-  push → adopt → snapshot → advance state transactionally.
+  push → adopt → snapshot → advance state transactionally. Every mutation is
+  journaled before it happens: if a write fails mid-apply, completed steps
+  are rolled back (local files restored, remote pages restored to their prior
+  blocks or archived when newly created) before the error surfaces, so a
+  failed sync never leaves a half-applied state.
+- **Push is full-page replacement.** A local edit replaces the whole Notion
+  page: all blocks except child pages are deleted, then the new tree is
+  appended. Child pages are preserved; per-block comments or history on the
+  replaced blocks are not. When the canonical content is unchanged the
+  replacement is skipped entirely (no API calls).
 - **Deletions are never destructive.** A Notion page archived or deleted for
   a mapped file is reported; the local file is preserved.
 - **New pages are adopted safely.** An unmapped hub child titled like a valid
   relpath is adopted as a local file only after route validation (no absolute
-  paths, no `..` traversal, must stay under the memory root, known entity
-  directories only), collision checks, and a guard scan.
+  paths, no `..` traversal, no hidden directories, must stay under the memory
+  root, known entity directories only), collision checks (including
+  case-insensitive), reserved-name checks (`INDEX.md` is never adopted), and
+  a guard scan. Titles pointing at `memory/bank/` (runtime-managed) or
+  date-stamped daily logs (`memory/YYYY-MM-DD.md`) are never adopted. A
+  successful adoption also appends the new file to its directory's `INDEX.md`
+  (when one exists; otherwise it is reported).
 
 ## Setup
 
@@ -62,18 +76,23 @@ export NOTION_SYNC_EXCLUDE="memory/bank/*"      # comma-separated globs
 
 ## Commands
 
-- `init` — first-time setup: maps each managed file to a hub page (adopting
-  an existing same-titled page without overwriting, or creating it), pushes
-  content, and establishes the three-way base. Guard-scans everything first.
+- `init` — first-time setup: maps each managed file to a hub page. A
+  same-titled page that is empty is seeded with the local content; one whose
+  content matches is adopted without rewriting; one whose content *differs*
+  is reported (exit 1) and left untouched on both sides — a human aligns the
+  contents and re-runs. Guard-scans everything first.
 - `sync` — full two-way sync. Exit 0: applied cleanly. Exit 1: conflicts /
   holds / blocks / deletions / errors — nothing was written; resolve and
-  re-run. Exit 2: operational failure.
+  re-run. Exit 2: operational failure (a mid-apply failure rolls back every
+  completed step before surfacing).
 - `status [--json]` — show the computed plan without writing anything.
   Exit 1 when the plan is not fully actionable.
 - `restore <snapshot-page-id> <staging-dir>` — restore a dated snapshot
   into a staging directory (never touches live files), with exact
-  accounting: total files, byte-identical, canonically equivalent, genuine
-  mismatches, live-only files.
+  accounting: total files restored, byte-identical, canonically equivalent,
+  genuine mismatches, snapshot-only files (in the snapshot but not live),
+  live-only files (live but not in the snapshot). Exit 1 when any file
+  genuinely mismatches.
 - `version` — print the version.
 
 ## Guard integration
@@ -113,3 +132,6 @@ never inside the managed tree):
 
 `tests/test_notion_sync.py` runs the full suite against the in-memory fake
 transport — no credentials, no network: `python3 -m pytest tests/ -q`.
+That includes end-to-end CLI runs through the real `bin/memory-notion-sync`
+wrapper (the fake persists across subprocesses via `NOTION_SYNC_FAKE_FILE`),
+covering exit codes 0/1/2 for init, sync, status, and restore.

@@ -28,7 +28,7 @@ mk() { # mk <dest> <asset> — copy asset only if dest is missing
   fi
 }
 
-mkdir -p "$MEM"/{people,groups,topics,trace,bank}
+mkdir -p "$MEM"/{people,groups,topics,meetings,activities,interests,locations,trace,bank}
 
 mk "$ROOT/MEMORY.md"              MEMORY.md
 mk "$MEM/personalization.md"     personalization.md
@@ -36,6 +36,10 @@ mk "$MEM/INDEX.md"               INDEX.md
 mk "$MEM/people/INDEX.md"       people-INDEX.md
 mk "$MEM/groups/INDEX.md"       groups-INDEX.md
 mk "$MEM/topics/INDEX.md"       topics-INDEX.md
+mk "$MEM/meetings/INDEX.md"     meetings-INDEX.md
+mk "$MEM/activities/INDEX.md"   activities-INDEX.md
+mk "$MEM/interests/INDEX.md"    interests-INDEX.md
+mk "$MEM/locations/INDEX.md"    locations-INDEX.md
 mk "$MEM/trace/INDEX.md"         trace-INDEX.md
 mk "$MEM/trace/trace.md"         trace.md
 

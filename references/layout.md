@@ -14,6 +14,24 @@ All paths are relative to the memory root (`$PERSONAL_MEMORY_ROOT`, default
 ~/memory/topics/ + INDEX.md   One page per tracked topic (e.g. health,
                              travel, finance, home, hobbies). Read the
                              matching page whenever that topic comes up.
+~/memory/meetings/ + INDEX.md One page per significant meeting, call, or
+                             recorded conversation: date, participants,
+                             source, summary, decisions, commitments,
+                             follow-ups. Read the matching page whenever a
+                             meeting comes up.
+~/memory/activities/ + INDEX.md One page per notable non-meeting memo or
+                             recording (voice memos, errands, workout or
+                             lesson notes).
+~/memory/interests/ + INDEX.md One accumulating page per interest of the
+                             user's, built from dated evidence. A page is
+                             created only with real evidence (repeated
+                             time/attention or a clearly stated interest),
+                             never from a passing mention.
+~/memory/locations/ + INDEX.md One page per significant place (home, school,
+                             venues, workplaces, frequent destinations):
+                             address, what happens there, durable facts.
+                             Read the matching page whenever a location
+                             comes up.
 ~/memory/trace/ + INDEX.md    Append-only temporal log, newest first.
                              Top = latest knowledge; deeper = history.
 ~/memory/YYYY-MM-DD.md        Raw daily logs. Day-to-day detail that didn't
@@ -36,6 +54,10 @@ All paths are relative to the memory root (`$PERSONAL_MEMORY_ROOT`, default
 | About a specific person | `~/memory/people/<person>.md` |
 | About a community / team | `~/memory/groups/<group>.md` |
 | About a tracked topic | `~/memory/topics/<topic>.md` |
+| About a significant meeting/call | `~/memory/meetings/YYYY-MM-DD-<slug>.md` |
+| About a non-meeting memo/recording | `~/memory/activities/YYYY-MM-DD-<slug>.md` |
+| Evidence of a user interest | `~/memory/interests/<slug>.md` (only with real evidence — repeated time/attention or a clearly stated interest) |
+| About a significant place | `~/memory/locations/<slug>.md` (only for recurring places, not one-off mentions) |
 | Durable user fact or commitment | `~/MEMORY.md` + central profile |
 | Preference or habit pattern | `~/memory/personalization.md` |
 | Day-to-day detail | `~/memory/<date>.md` |
@@ -53,6 +75,12 @@ All paths are relative to the memory root (`$PERSONAL_MEMORY_ROOT`, default
   counts, prices, schedules) is written as "as of YYYY-MM-DD".
 - **Indexes are the map.** Each `INDEX.md` lists every page in its directory
   with a one-line description, closest/most important first.
+- **Entities accumulate.** People, groups, topics, meetings, activities,
+  interests, and locations are entity profiles that build up over time:
+  every new source (scan, note, recording, conversation) files its entities
+  into the matching pages and cross-links them. Never invent a person page
+  for someone who can't be identified — mark them `(unidentified …)` in the
+  meeting profile instead.
 - **Dated plans decay.** A time-bound plan kept in full in a curated file
   will rot there. The trace's `valid_until` + open thread is the mechanism
   that retires it; the curated files only point at it.

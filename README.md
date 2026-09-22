@@ -88,8 +88,10 @@ in the log — not in someone's faulty recollection.
 ┌──────────┐   route by   ┌─────────────────────┐  index-first  ┌──────────┐
 │ daily job │──kind──────▶│ MEMORY.md             │─────────────▶│ answer   │
 │ + watcher │             │ people/ groups/       │  ≤3 pages    │ grounded │
-└──────────┘   trace every│ topics/               │  verify old  │ in what  │
-               change     │ trace/ (append-only)  │  facts       │ changed  │
+└──────────┘   trace every│ topics/ meetings/     │  verify old  │ in what  │
+               change     │ activities/ interests/│  facts       │ changed  │
+                          │ locations/            │              │          │
+                          │ trace/ (append-only)  │              │          │
                           └─────────────────────┘              └──────────┘
 ```
 

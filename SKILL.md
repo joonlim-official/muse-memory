@@ -9,8 +9,9 @@ description: "Set up and operate a durable personal memory for an AI assistant: 
 Give an AI assistant a long-term memory that stays organized, searchable,
 and current. The skill covers the full lifecycle: **scanning** (collecting
 from the user's surfaces), **retrieval** (searching before answering),
-**management** (routing each fact to its home), **indexing** (people,
-groups, topics), **organization** (curated files plus an append-only
+**management** (routing each fact to its home), **indexing** (entity
+profiles: people, groups, topics, meetings, activities, interests,
+locations), **organization** (curated files plus an append-only
 temporal trace), **evolution** (scheduled collect/update/refine and
 evaluation), and **protection** (a data-protection layer — egress gates,
 send shims, briefing policy — validated by the muse-leakage-guard
@@ -38,8 +39,13 @@ add-on).
   files (on Muse: `muse.memory_search`).
 - Exact identifiers (names, dates, confirmation numbers, addresses) →
   `bin/memory-grep <pattern>` (keyword search across the whole tree).
-- When a person, group, or topic is in play, read their page in addition to
-  searching.
+- Contextual retrieval: every turn, resolve the entities in play — person,
+  group, topic, meeting, activity, interest, or location — against the
+  matching `INDEX.md` and read the matching page(s) in addition to searching.
+  The turn's entities decide what gets read: a place name pulls its location
+  profile, a meeting reference pulls its meeting profile, and so on.
+  Nicknames and aliases resolve via the INDEX descriptions and
+  `bin/memory-grep`. Budget: index first, at most 1–3 pages per turn.
 
 ### 3. Writing memory
 - Route each fact to its home — see the routing table in
@@ -54,7 +60,8 @@ add-on).
 
 ## Output Contract
 - Memory root contains: curated memory file, personalization notes,
-  `people/`, `groups/`, `topics/` (each with an `INDEX.md`), `trace/`
+  `people/`, `groups/`, `topics/`, `meetings/`, `activities/`, `interests/`,
+  `locations/` (each with an `INDEX.md`), `trace/`
   (`INDEX.md` + append-only `trace.md`), and dated daily logs.
 - `trace/trace.md` is append-only, newest first, every entry source-cited.
 - Three scheduled jobs keep the memory current: one daily collect/update/

@@ -9,3 +9,5 @@ Thumbs.db
 
 # Local test sandboxes
 /memtest/
+__pycache__/
+*.pyc

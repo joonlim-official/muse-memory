@@ -31,6 +31,16 @@ findable, or quieter?*
 - Changes to the trace entry format without discussion — it's the one
   backward-compatibility surface in the project.
 
+## Python components (e.g. notion-sync)
+
+- Stdlib only — no third-party dependencies, so the skill installs cleanly.
+- Every behavior gets a synthetic test in `tests/` using the in-memory fake
+  transport. No credentials, no network in tests.
+- Run before every PR: `python3 -m py_compile lib/...` on changed modules
+  and `python3 -m pytest tests/ -q`. Both must be green.
+- Round-trip accounting matters: byte-identical > canonically equivalent >
+  genuine mismatch. Measure it, don't assert it.
+
 ## Process
 
 1. Fork, branch, commit with a clear message.

@@ -220,6 +220,16 @@ a temporal log of everything that changed, and a weekly audit keeping it
 all honest. After a year, it's the closest thing to an assistant that
 actually knows you.
 
+## Optional: Notion two-way sync
+
+A stdlib-only Python component (`bin/memory-notion-sync`, see
+`references/notion-sync.md`) keeps the memory in two-way sync with Notion:
+Notion hosts a persistent live page tree you can edit by hand, Markdown
+files remain the operational storage, every sync writes a dated recovery
+snapshot, and simultaneous edits on both sides become conflicts where both
+versions are preserved and neither is overwritten. Fully tested with a fake
+Notion transport (`python3 -m pytest tests/ -q`) — no credentials needed.
+
 ## Layout
 
 ```

@@ -206,3 +206,27 @@ the machine does the measuring, the human does the judging.
   watermark so the two never interfere.
 - If the platform supports goal-owned schedules, attach both jobs to the
   memory goal so their lifecycle follows it.
+
+## Job 4 (optional) — Notion two-way sync
+
+Runs on a schedule the user chooses (daily is typical, or before the weekly
+backup). Pulls manual Notion edits into the Markdown files, pushes local
+edits to Notion, and writes a dated recovery snapshot — all-or-nothing.
+
+**Critical:** stop immediately on any nonzero exit. Never back up, push, or
+advance state after a conflict, guard hold/block, or failure. Exit codes:
+0 = applied cleanly, 1 = sync not fully applied (nothing was written),
+2 = operational failure.
+
+```bash
+export NOTION_SYNC_MEMORY_ROOT="[memory root]"
+export NOTION_API_KEY="[integration token]"
+export NOTION_HUB_ID="[hub page id]"
+# optional: NOTION_STATE_DIR, NOTION_TZ, NOTION_SYNC_EXCLUDE
+
+bin/memory-notion-sync sync || exit 1
+```
+
+If the weekly backup runs after this job, it must check this job's exit
+status first and skip the backup on any failure — a backup of a conflicted
+or partially synced tree is worse than no backup.

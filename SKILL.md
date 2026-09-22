@@ -58,6 +58,23 @@ add-on).
   egress rule — run `bin/memory-egress-check` on anything leaving the
   user's private surfaces.
 
+### 4. Optional: Notion two-way sync
+
+An opt-in, stdlib-only Python component (`lib/notion_sync/`,
+`bin/memory-notion-sync`) keeps the memory in two-way sync with Notion:
+
+- Notion hosts a persistent **live page tree** (one page per managed file)
+  that a human can read and edit; Markdown files remain operational storage.
+- Local edits push to Notion; manual Notion edits pull back (guard-scanned).
+- Every successful sync also writes a dated recovery snapshot page.
+- Three-way reconciliation (base vs local vs remote): simultaneous edits
+  are **conflicts — both versions preserved, neither overwritten**; the sync
+  writes nothing until the whole plan is actionable (all-or-nothing).
+- Deletions are never destructive: an archived Notion page is reported,
+  the local file is kept.
+- Full contract in `references/notion-sync.md`. Synthetic tests:
+  `python3 -m pytest tests/ -q` (fake transport, no credentials).
+
 ## Output Contract
 - Memory root contains: curated memory file, personalization notes,
   `people/`, `groups/`, `topics/`, `meetings/`, `activities/`, `interests/`,

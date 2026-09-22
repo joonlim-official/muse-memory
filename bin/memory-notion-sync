@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# memory-notion-sync — two-way sync between muse-memory markdown files and Notion.
+#
+# Usage:
+#   memory-notion-sync init [--no-guard]
+#   memory-notion-sync sync [--json] [--no-guard]
+#   memory-notion-sync status [--json] [--no-guard]
+#   memory-notion-sync restore <snapshot-page-id> <staging-dir> [--no-guard]
+#   memory-notion-sync version
+#
+# Configuration is entirely environment-based (see references/notion-sync.md):
+#   NOTION_SYNC_MEMORY_ROOT (or PERSONAL_MEMORY_ROOT) — memory installation root
+#   NOTION_API_KEY   — Notion internal integration token
+#   NOTION_HUB_ID    — page hosting the live memory tree
+#   NOTION_STATE_DIR — sync state dir (default: <root>/.notion-sync)
+#   NOTION_GUARD_BIN — memory-guard path (default: <skill>/bin/memory-guard)
+#   NOTION_TZ        — IANA timezone for snapshot titles (default: America/Los_Angeles)
+#
+# Exit codes: 0 success / clean, 1 sync not fully applied (nothing written),
+# 2 operational failure. The weekly backup cron must stop on any nonzero exit.
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$SKILL_DIR/lib${PYTHONPATH:+:$PYTHONPATH}"
+
+exec python3 -m notion_sync "$@"

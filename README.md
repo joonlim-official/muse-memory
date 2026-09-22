@@ -102,8 +102,11 @@ Three disciplines keep it honest:
   `bin/memory-guard` scans every write: secrets are a hard block, financial
   figures are flagged for human review.
 - **Read discipline** — read the index first, load at most 1–3 relevant
-  pages, surface nothing rather than noise. Facts older than ~90 days are
-  re-verified or labeled stale.
+  pages, surface nothing rather than noise. Retrieval is contextual: every
+  turn, the entities in play (person, group, topic, meeting, activity,
+  interest, or location) are resolved against the matching index and the
+  matching pages are read. Facts older than ~90 days are re-verified or
+  labeled stale.
 - **Quality discipline** — a weekly audit counts entries per area, expires
   `valid_until` items, surfaces open threads older than 30 days, and runs a
   full guard scan. Mechanical fixes apply automatically; judgment calls go to
@@ -114,6 +117,18 @@ append-only, newest-first log with typed entries (`fact`, `preference`,
 `decision`, `learning`, `relationship`, `context`), source citations, and
 open/closed status. History is superseded, never deleted. (See "Clear wins"
 above for what this looks like in practice.)
+
+### Entity profiles
+
+Memories are organized by entity, not by date. Every person, group, topic,
+meeting, activity, interest, and location gets its own page that builds up
+over time: each new scan, note, or recording files its entities into the
+matching pages and cross-links them, so asking about anything pulls its
+full accumulated context. Two guardrails keep the layer honest: nobody gets
+a person page unless they're identifiable (an unnamed voice in a recording
+is marked `(unidentified …)` in the meeting note, never invented as a
+person), and an interest earns a page only with real repeated evidence —
+never a passing mention.
 
 ## Compared to the alternatives
 
@@ -199,10 +214,11 @@ The skill text targets Claude-style agents, but the layout, conventions, and
 scripts are assistant-agnostic — any agent that can read markdown and run
 shell commands can use them.
 
-After 30 days you have: a curated profile of the user, per-person and
-per-topic pages, a temporal log of everything that changed, and a weekly
-audit keeping it all honest. After a year, it's the closest thing to an
-assistant that actually knows you.
+After 30 days you have: a curated profile of the user, per-person,
+per-topic, per-meeting, per-activity, per-interest, and per-location pages,
+a temporal log of everything that changed, and a weekly audit keeping it
+all honest. After a year, it's the closest thing to an assistant that
+actually knows you.
 
 ## Layout
 
@@ -210,7 +226,8 @@ assistant that actually knows you.
 SKILL.md            the skill: setup, reading, writing, operating rules
 references/         layout & routing table · trace conventions ·
                     privacy & validation · cron templates
-assets/             starter templates: MEMORY.md, person/group/topic pages,
+assets/             starter templates: MEMORY.md, person/group/topic/
+                    meeting/activity/interest/location pages,
                     personalization, trace + indexes
 bin/
   init-memory       create the directory skeleton (idempotent)

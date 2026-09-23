@@ -82,6 +82,40 @@ An iteration is done when, in order:
 7. The human got a concise report: what changed, the validation
    result, and whether anything needs their judgment.
 
+## Eval framework v2 (2026-09-23) — hardened joints
+
+The loop above keeps its shape. v2 hardens four joints, specified fully in
+`~/workspace/goals/daily-memory-refresh/files/eval-framework-v2.md`:
+
+1. **Measure-first.** Every iteration records metrics to the trajectory
+   *before* patching (baseline) and *after* (delta). The trajectory write
+   is part of "done," same status as tests. A patch without a recorded
+   delta is not done.
+2. **Quantified decision rules.** Instance vs. system keeps the 2+
+   recurrence rule; any regression-rule trip (MRR drop > 0.05 WoW, two
+   consecutive WoW declines, abstention < 1.0, dev/holdout gap > 0.1) is
+   automatically a system finding. Patch acceptance = full validation +
+   holdout no-regression + trajectory delta recorded + all five Level 1
+   numbers reported.
+3. **Anti-Goodhart.** Mechanism-only patches (no query-specific fixes);
+   holdout blindness (the patching loop never sees holdout queries);
+   every patch reports all five Level 1 numbers, not just the improved
+   one; every patch names its target metric — zero delta after 2 weeks
+   means revert or re-examine.
+4. **Falsification criteria.** Provisional bars (confirmed 2026-09-23,
+   revisit later): routing MRR < 0.7 for 4 weeks despite mechanism
+   patches, coverage < 0.5 for 4 weeks, abstention < 1.0 for 2 weeks.
+   Hitting one escalates to Joon as an *architecture* question, never a
+   silent patch.
+5. **Loop self-audit (monthly).** Review every patch's measured delta.
+   Zero-delta patches get reverted or re-examined, verdict recorded.
+   Threshold constants are recalibrated against observed performance
+   after the 4-week baseline — they are calibrated, not fixed.
+
+The auditor's Sunday report becomes three trajectory numbers (MRR trend,
+abstention, coverage) plus hygiene counts, replacing clean/dirty.
+Semantic spot-checks use a fixed rubric with recorded verdicts.
+
 ## History
 
 - 2026-09-22 (night): third iteration — no-args stdin hang/false-clean in

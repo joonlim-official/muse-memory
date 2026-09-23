@@ -1,25 +1,329 @@
 #!/usr/bin/env bash
 # memory-retrieval-test: retrieval self-test for the personal memory system.
-# Runs a file of sample queries against memory-grep and checks each query
-# finds its expected home. Keyword retrieval is deterministic, so it is
-# machine-testable; semantic (concept) retrieval is evaluated qualitatively
-# by the agent during the weekly audit.
 #
-# Usage: memory-retrieval-test <query-file> [memory-root]
+# v1 — keyword presence: runs a file of sample queries against memory-grep
+# and checks each query finds its expected home. Keyword retrieval is
+# deterministic, so it is machine-testable; semantic (concept) retrieval is
+# evaluated qualitatively by the agent during the weekly audit.
+#
+# v2 — ranked retrieval metrics + trajectory output, per the eval framework
+# (~/workspace/goals/daily-memory-refresh/files/eval-framework-v2.md §1).
+#
+# v2 RANKING FUNCTION — part of the system under test. Do not change silently:
+#   From memory-grep output, parse `file:line:` hit lines. Group hits by file.
+#   Rank files by (hit_count DESC, first_hit_line ASC); remaining full ties
+#   are broken by file path ASC so the ordering is fully deterministic.
+#   Every "rank 1-3" reference in the metrics below uses this ordering. If this
+#   function ever changes, historical trajectory scores are not comparable:
+#   bump the suite version and record the change in the query changelog.
+#
+# Usage v1: memory-retrieval-test <query-file> [memory-root]
 #   query-file: one test per line:  <query> ||| <expected-substring>
 #   lines starting with # are comments; blank lines skipped.
 #   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
-# Exit: 0 = all pass, 1 = one or more failures.
+# Usage v2: memory-retrieval-test --v2 <query-file>
+#             [--split dev|holdout|all] [--trajectory <jsonl>]
+#             [--memory-root <dir>]
+#   query-file: JSONL, one object per line:
+#     {"id":"p01","query":"...","stratum":"person",
+#      "expected":["people/anuj"],"rationale":"...",
+#      "added":"2026-09-23","suite_version":"v2","split":"dev"}
+#   expected is a ranked list of file-path substrings (ranked for the
+#   ambiguous stratum, single-element otherwise, [] for abstention).
+#   --split selects which split to run (default: all).
+#   --trajectory appends one JSONL record per run (schema: framework §3.1).
+#   --memory-root is passed through as PERSONAL_MEMORY_ROOT.
+# Exit: 0 = all pass, 1 = one or more failures, 2 = harness error
+#   (malformed query file, bad --split value, missing memory root).
 set -u
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage_v1() {
   echo "usage: memory-retrieval-test <query-file> [memory-root]"
   echo "  Each line: <query> ||| <expected-substring>."
   echo "  Checks memory-grep results contain the expected file."
+}
+
+usage_v2() {
+  echo "usage: memory-retrieval-test --v2 <query-file>"
+  echo "         [--split dev|holdout|all] [--trajectory <jsonl>]"
+  echo "         [--memory-root <dir>]"
+  echo "  query-file: JSONL, one object per line with id, query, stratum,"
+  echo "    expected (ranked list of path substrings, [] for abstention),"
+  echo "    rationale, added, suite_version, split (dev|holdout)."
+  echo "  Reports Hit@3, MRR, mean Noise@3, abstention precision and"
+  echo "  p50/p95 latency; --trajectory appends one JSONL record per run."
+}
+
+run_v2() {
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    usage_v2
+    return 0
+  fi
+  local qf="${1:?usage: memory-retrieval-test --v2 <query-file> [options]}"
+  shift
+  local split="all" traj="" root="${PERSONAL_MEMORY_ROOT:-$HOME}"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --split)         split="${2:?missing value for --split}"; shift 2 ;;
+      --split=*)       split="${1#--split=}"; shift ;;
+      --trajectory)    traj="${2:?missing value for --trajectory}"; shift 2 ;;
+      --trajectory=*)  traj="${1#--trajectory=}"; shift ;;
+      --memory-root)   root="${2:?missing value for --memory-root}"; shift 2 ;;
+      --memory-root=*) root="${1#--memory-root=}"; shift ;;
+      -h|--help)       usage_v2; return 0 ;;
+      *) echo "memory-retrieval-test v2: unknown option: $1" >&2; return 2 ;;
+    esac
+  done
+  case "$split" in
+    dev|holdout|all) ;;
+    *) echo "memory-retrieval-test v2: --split must be dev|holdout|all" >&2
+       return 2 ;;
+  esac
+  [ -r "$qf" ] || {
+    echo "memory-retrieval-test v2: cannot read query file: $qf" >&2
+    return 2
+  }
+  [ -d "$root" ] || {
+    echo "memory-retrieval-test v2: memory root not found: $root" >&2
+    return 2
+  }
+  export PERSONAL_MEMORY_ROOT="$root"
+  local pdate
+  pdate="$(TZ=America/Los_Angeles date +%F)"
+  python3 - "$qf" "$split" "$traj" "$SKILL_DIR" "$pdate" <<'PYEOF'
+import json, math, os, subprocess, sys, time
+
+def die(msg):
+    sys.stderr.write("memory-retrieval-test v2: harness error: %s\n" % msg)
+    sys.exit(2)
+
+STRATA = {"person", "group", "topic", "meeting", "location",
+          "fact", "temporal", "abstention", "ambiguous"}
+
+def load_queries(path, want_split):
+    try:
+        fh = open(path, encoding="utf-8")
+    except OSError as e:
+        die("cannot read query file %s (%s)" % (path, e))
+    recs = []
+    with fh:
+        for lineno, line in enumerate(fh, 1):
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            try:
+                rec = json.loads(s)
+            except ValueError as e:
+                die("line %d: invalid JSON (%s)" % (lineno, e))
+            if not isinstance(rec, dict):
+                die("line %d: expected a JSON object" % lineno)
+            for f in ("id", "query", "stratum", "expected", "split"):
+                if f not in rec:
+                    die("line %d: missing required field %r" % (lineno, f))
+            if not isinstance(rec["expected"], list) or \
+               not all(isinstance(x, str) for x in rec["expected"]):
+                die("line %d: 'expected' must be a list of strings" % lineno)
+            if rec["stratum"] not in STRATA:
+                die("line %d: unknown stratum %r" % (lineno, rec["stratum"]))
+            if rec["split"] not in ("dev", "holdout"):
+                die("line %d: 'split' must be dev|holdout, got %r"
+                    % (lineno, rec["split"]))
+            if rec["stratum"] == "abstention" and rec["expected"]:
+                die("line %d: abstention stratum requires empty 'expected'"
+                    % lineno)
+            if rec["stratum"] != "abstention" and not rec["expected"]:
+                die("line %d: non-abstention stratum requires non-empty "
+                    "'expected'" % lineno)
+            if want_split != "all" and rec["split"] != want_split:
+                continue
+            recs.append(rec)
+    if not recs:
+        die("no queries selected (split=%s)" % want_split)
+    return recs
+
+def parse_hits(text):
+    """Parse `file:line:` hit lines from memory-grep output."""
+    hits = []
+    for line in text.splitlines():
+        head, sep, rest = line.partition(":")
+        if not sep:
+            continue
+        num, sep2, _tail = rest.partition(":")
+        if not sep2 or not num.isdigit():
+            continue
+        hits.append((head, int(num)))
+    return hits
+
+def rank_files(hits):
+    """RANKING FUNCTION (see script header): group hits by file, order by
+    (hit_count DESC, first_hit_line ASC, file path ASC)."""
+    counts = {}
+    first = {}
+    for path, ln in hits:
+        counts[path] = counts.get(path, 0) + 1
+        if path not in first or ln < first[path]:
+            first[path] = ln
+    return sorted(counts, key=lambda p: (-counts[p], first[p], p))
+
+def run_grep(greppath, query, env):
+    t0 = time.perf_counter_ns()
+    try:
+        proc = subprocess.run(
+            [greppath, query, "0"], env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        die("memory-grep timed out after 120s on query %r" % query)
+    ms = (time.perf_counter_ns() - t0) / 1e6
+    return proc.stdout, ms
+
+def score_query(rec, ranked):
+    exp = [e.lower() for e in rec["expected"]]
+    top3 = ranked[:3]
+
+    def matches(path):
+        pl = path.lower()
+        return any(e in pl for e in exp)
+
+    if not exp:  # abstention stratum: pass iff nothing ranked
+        return {"abstention": True, "passed": len(ranked) == 0,
+                "ranked": ranked}
+    first_rank = None
+    for i, path in enumerate(ranked, 1):
+        if matches(path):
+            first_rank = i
+            break
+    hit3 = 1 if first_rank is not None and first_rank <= 3 else 0
+    return {"abstention": False,
+            "passed": hit3 == 1,
+            "hit3": hit3,
+            "rr": (1.0 / first_rank) if first_rank else 0.0,
+            "rank": first_rank,
+            "noise3": sum(1 for p in top3 if not matches(p)),
+            "ranked": ranked}
+
+def main():
+    if len(sys.argv) != 6:
+        die("internal: expected 5 arguments, got %d" % (len(sys.argv) - 1))
+    qf, want_split, traj, skill_dir, pdate = sys.argv[1:6]
+    greppath = os.path.join(skill_dir, "bin", "memory-grep")
+    if not os.path.isfile(greppath):
+        die("memory-grep not found at %s" % greppath)
+    recs = load_queries(qf, want_split)
+    env = dict(os.environ)
+
+    versions = {}
+    for r in recs:
+        v = r.get("suite_version", "v2")
+        versions[v] = versions.get(v, 0) + 1
+    suite_version = max(sorted(versions), key=lambda v: versions[v])
+
+    results = []
+    print("# memory-retrieval-test v2 — %s (split=%s, suite=%s)"
+          % (pdate, want_split, suite_version))
+    print("")
+    for rec in recs:
+        out, ms = run_grep(greppath, rec["query"], env)
+        ranked = rank_files(parse_hits(out))
+        s = score_query(rec, ranked)
+        s["ms"] = ms
+        results.append(s)
+        tag = "%s|%s|%s" % (rec["id"], rec["stratum"], rec["split"])
+        if s["abstention"]:
+            status = "PASS" if s["passed"] else "FAIL"
+            detail = ("abstention(empty)" if s["passed"]
+                      else "expected empty, got %d file(s)" % len(ranked))
+            print("  %s [%s] %s %.0fms :: %s"
+                  % (status, tag, detail, ms, rec["query"]))
+        else:
+            status = "PASS" if s["passed"] else "FAIL"
+            rank_s = str(s["rank"]) if s["rank"] else "-"
+            print("  %s [%s] hit@3=%d rank=%s rr=%.3f noise@3=%d %.0fms :: %s"
+                  % (status, tag, s["hit3"], rank_s, s["rr"],
+                     s["noise3"], ms, rec["query"]))
+        if not s["passed"]:
+            exp_s = ", ".join(rec["expected"]) or "(empty)"
+            print("       expected: %s" % exp_s)
+            print("       ranked:   %s" % (", ".join(ranked) or "(none)"))
+
+    ranked_rs = [s for s in results if not s["abstention"]]
+    abst_rs = [s for s in results if s["abstention"]]
+    n = len(results)
+    hit_at_3 = (sum(s["hit3"] for s in ranked_rs) / len(ranked_rs)
+                if ranked_rs else 0.0)
+    mrr = (sum(s["rr"] for s in ranked_rs) / len(ranked_rs)
+           if ranked_rs else 0.0)
+    noise = (sum(s["noise3"] for s in ranked_rs) / len(ranked_rs)
+             if ranked_rs else 0.0)
+    abst = ((sum(1 for s in abst_rs if s["passed"]) / len(abst_rs))
+            if abst_rs else None)
+    lat = sorted(s["ms"] for s in results)
+
+    def pct(p):
+        k = math.ceil(p / 100.0 * len(lat)) - 1
+        return lat[max(0, min(k, len(lat) - 1))]
+
+    p50, p95 = pct(50), pct(95)
+    passed = sum(1 for s in results if s["passed"])
+    failed = n - passed
+
+    print("")
+    print("SUMMARY (v2)")
+    print("  queries:       %d (split=%s, suite_version=%s)"
+          % (n, want_split, suite_version))
+    print("  HIT@3:         %.3f" % hit_at_3)
+    print("  MRR:           %.3f" % mrr)
+    print("  mean Noise@3:  %.3f" % noise)
+    if abst is None:
+        print("  abstention:    n/a (no abstention queries)")
+    else:
+        print("  abstention:    %.3f (%d/%d)"
+              % (abst, sum(1 for s in abst_rs if s["passed"]), len(abst_rs)))
+    print("  latency p50:   %.0f ms" % p50)
+    print("  latency p95:   %.0f ms" % p95)
+    print("")
+    print("RESULT: %d passed, %d failed" % (passed, failed))
+
+    if traj:
+        record = {
+            "date": pdate,
+            "suite_version": suite_version,
+            "split": want_split,
+            "hit_at_3": round(hit_at_3, 4),
+            "mrr": round(mrr, 4),
+            "noise_at_3": round(noise, 4),
+            "abstention": round(abst, 4) if abst is not None else None,
+            "p50_ms": int(p50 + 0.5),
+            "p95_ms": int(p95 + 0.5),
+            "n_queries": n,
+            "notes": "",
+        }
+        try:
+            with open(traj, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record) + "\n")
+        except OSError as e:
+            die("cannot append trajectory file %s (%s)" % (traj, e))
+
+    sys.exit(0 if failed == 0 else 1)
+
+main()
+PYEOF
+}
+
+if [ "${1:-}" = "--v2" ]; then
+  shift
+  run_v2 "$@"
+  exit "$?"
+fi
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage_v1
   exit 0
 fi
 
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# --- v1 path: behavior unchanged ---
 QF="${1:?usage: memory-retrieval-test <query-file> [memory-root]}"
 export PERSONAL_MEMORY_ROOT="${2:-${PERSONAL_MEMORY_ROOT:-$HOME}}"
 

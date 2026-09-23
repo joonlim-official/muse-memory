@@ -22,7 +22,9 @@ add-on).
 ### 1. Set up
 1. Run `bin/init-memory` — creates the directory skeleton and starter files
    under the memory root (`$PERSONAL_MEMORY_ROOT`, default `~`). Never
-   overwrites existing files.
+   overwrites existing files. Every tool honors the root, including
+   `bin/memory-log-append` (daily logs land under
+   `${PERSONAL_MEMORY_ROOT:-$HOME}/memory`; `MEMORY_LOG_ROOT` overrides).
 2. Fill in the central profile and personalization notes from what you know
    about the user. Nothing goes into memory without the user's approval
    (see `references/privacy-and-validation.md`).

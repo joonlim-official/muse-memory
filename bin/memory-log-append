@@ -11,7 +11,10 @@
 #   memory-log-append [file ...]   # no args: read from stdin
 #
 # Env:
-#   MEMORY_LOG_ROOT   memory root dir (default: $HOME/memory)
+#   MEMORY_LOG_ROOT   memory root dir
+#                     (default: ${PERSONAL_MEMORY_ROOT:-$HOME}/memory —
+#                     follows a relocated memory root automatically;
+#                     set explicitly only to override that)
 #   MEMORY_LOG_TZ     IANA timezone for the local date
 #                     (default: America/Los_Angeles)
 #
@@ -21,7 +24,7 @@
 # Prints the log file path it appended to.
 set -u
 
-ROOT="${MEMORY_LOG_ROOT:-$HOME/memory}"
+ROOT="${MEMORY_LOG_ROOT:-${PERSONAL_MEMORY_ROOT:-$HOME}/memory}"
 TZ_NAME="${MEMORY_LOG_TZ:-America/Los_Angeles}"
 LOG_DATE="$(TZ="$TZ_NAME" date +%F)"
 LOG_FILE="$ROOT/$LOG_DATE.md"

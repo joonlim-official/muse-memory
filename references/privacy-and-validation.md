@@ -48,10 +48,12 @@ quotes, one-off tool outputs, anything the user can re-derive in seconds,
 duplicates.
 
 **Guard.** The skill ships `bin/memory-guard`: run it on new content
-before writing. Secrets are a hard block (fix first); financial figures
+before writing — pass a draft file, or pipe one (`echo <draft> |
+bin/memory-guard`). Secrets are a hard block (fix first); financial figures
 and personal-data patterns (SSN shapes, phone numbers, card-like
 sequences) are flagged for the user's review, never auto-deleted. Exit
-0 = clean, 1 = secrets found, 2 = figures / personal data only.
+0 = clean, 1 = secrets found, 2 = figures / personal data only. With no
+file args and a terminal, it audits the standard memory tree instead.
 
 **Egress.** Nothing leaves the user's private surfaces (chat, dashboard)
 without a check: run `bin/memory-egress-check` on the draft first. See

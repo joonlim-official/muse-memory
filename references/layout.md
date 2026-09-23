@@ -25,8 +25,14 @@ accumulates over time; one fact lives in exactly one home.
 | `~/memory/bank/` | Runtime-managed reflections (if the platform provides them). Readable; do not edit directly. | — | — |
 | `<central-profile>` | One document describing the user (+ household), the single source of truth. Lives wherever the user keeps documents (e.g. a workspace your_files/ directory); link it from the memory INDEX.md. | — | The full user picture is needed |
 
-Distinctions that matter:
-- **Topics vs interests.** A topic is *tracked* (health, finance, travel) —
+## Environment
+
+Every tool resolves paths from the memory root (`$PERSONAL_MEMORY_ROOT`,
+default `~`). The daily-log helper follows it too: `bin/memory-log-append`
+writes under `${PERSONAL_MEMORY_ROOT:-$HOME}/memory` — set `MEMORY_LOG_ROOT`
+explicitly only to override that.
+
+## Distinctions that matter:- **Topics vs interests.** A topic is *tracked* (health, finance, travel) —
   the system watches it. An interest is *proven* (repeated time/attention)
   — the user demonstrated it. A passing mention of Formula 1 creates no
   interest page; six months of race-strategy reading does.

@@ -3,7 +3,8 @@
 # Secrets are a hard block; financial figures and personal-data patterns
 # are flagged for human review.
 # Usage: memory-guard [path ...] | memory-guard --help
-#   (default: the standard memory tree, excluding runtime-managed bank/)
+#   no args + piped stdin: scan the piped draft (echo <draft> | memory-guard)
+#   no args + terminal:    the standard memory tree, excluding runtime-managed bank/
 # Env:
 #   PERSONAL_MEMORY_ROOT   memory root (default: $HOME)
 #   MEMORY_FIGURE_ALLOWLIST
@@ -36,6 +37,8 @@ set -u
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "usage: memory-guard [path ...]"
   echo "  Pre-write / audit scan for memory content."
+  echo "  no args + piped stdin: scan the piped draft"
+  echo "  no args + terminal:    scan the standard memory tree"
   echo "  exit 0 = clean, 1 = secrets found (block the write),"
   echo "  2 = financial figures / personal data only (flag for human review)."
   exit 0
@@ -44,8 +47,18 @@ fi
 ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
 FINANCE_INDEX="${MEMORY_FINANCE_INDEX:-$ROOT/memory/finance-index.md}"
 
+STDIN_TMP=""
+cleanup() { [ -n "${STDIN_TMP:-}" ] && rm -f "$STDIN_TMP"; }
+trap cleanup EXIT
+
 if [ "$#" -gt 0 ]; then
   TARGETS=("$@")
+elif [ ! -t 0 ]; then
+  # Piped draft: scan the piped content, not the default tree — a silent
+  # tree scan here would report a false clean on content never examined.
+  STDIN_TMP="$(mktemp)"
+  cat > "$STDIN_TMP"
+  TARGETS=("$STDIN_TMP")
 else
   TARGETS=("$ROOT/MEMORY.md" "$ROOT/memory/personalization.md"
            "$ROOT/memory/INDEX.md" "$ROOT/memory/people"

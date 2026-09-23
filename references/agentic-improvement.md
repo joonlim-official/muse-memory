@@ -73,7 +73,12 @@ An iteration is done when, in order:
 3. `bin/adversarial-run` is 100% (exit 0).
 4. New/changed behavior is covered by a test or corpus case.
 5. Docs updated (attack-surface, test-matrix, README, or this file).
-6. Changes committed and pushed to the skill repos.
+6. Changes committed and pushed to the skill repos — with the push VERIFIED:
+   `git fetch` then `git rev-list --count origin/main..HEAD` must be 0.
+   A rejected or partial push is a finding, never a done: prior runs
+   claimed "commit + push" while 15 leak-guard commits sat unpushed since
+   2026-09-17 (token lacked `workflow` scope for workflow-file changes).
+   Surface the remote's exact error to the auditor with remediation.
 7. The human got a concise report: what changed, the validation
    result, and whether anything needs their judgment.
 

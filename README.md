@@ -130,6 +130,33 @@ is marked `(unidentified …)` in the meeting note, never invented as a
 person), and an interest earns a page only with real repeated evidence —
 never a passing mention.
 
+## How your personal memory is organized
+
+Your memory is organized by *entity* — people, places, interests, topics,
+events — not by date. Each entity gets its own page that accumulates over
+time, so asking about anything pulls its full context, and no fact lives
+in two places at once. The index in each directory is the map.
+
+| Store | Holds | Synthetic example |
+|---|---|---|
+| `MEMORY.md` | Curated long-term facts, preferences, commitments — only what lasts | "Prefers the window seat on flights" |
+| `personalization.md` | Distilled habits and patterns the system learned | "Skims headlines first, saves deep-dives for the weekend" |
+| `people/` | One page per person — family, friends, teachers, coaches, colleagues | The kid's piano teacher and her recital schedule |
+| `groups/` | Communities and teams you belong to | A weekend cycling club |
+| `topics/` | Tracked topics followed over time — health, finance, home, hobbies | Home-renovation research |
+| `interests/` | Interests *proven* by repeated time/attention (a page only with real evidence) | Formula 1 race-strategy analysis |
+| `locations/` | Significant places — home, school, venues, frequent destinations | A favorite trailhead and its parking notes |
+| `meetings/` | Significant meetings/calls: date, participants, decisions, follow-ups | A contractor's quote walkthrough |
+| `activities/` | Solo memos and recordings: voice notes, errands, workout logs | A voice memo from a morning run |
+| `trace/` | The temporal log, newest first — what changed, when, and why | "Trip moved April → October (decision)" |
+| Daily logs | Raw day-to-day detail that didn't make the curated cut | Tuesday's errands |
+
+Three things this buys you: **recall** — every turn reads the indexes and
+loads only the 1–3 pages in play; **honesty** — the trace supersedes
+instead of overwriting, so any fact's evolution is readable; and
+**safety** — a pre-write scan blocks secrets and flags financial figures
+before anything lands.
+
 ## Compared to the alternatives
 
 | | Chat logs | Vector memory services | muse-memory |
@@ -240,12 +267,13 @@ money habits out of memory, composes a grounded feed prompt, and
 applies it (`feed.prompt_update`); it re-grounds when memory changes
 materially. Full playbook: `references/feed-personalization.md`.
 
-## Layout
+## Repo layout
 
 ```
 SKILL.md            the skill: setup, reading, writing, operating rules
 references/         layout & routing table · trace conventions ·
-                    privacy & validation · cron templates
+                    privacy & validation · cron templates ·
+                    feed personalization · notion sync
 assets/             starter templates: MEMORY.md, person/group/topic/
                     meeting/activity/interest/location pages,
                     personalization, trace + indexes

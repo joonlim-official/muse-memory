@@ -76,6 +76,23 @@ An opt-in, stdlib-only Python component (`lib/notion_sync/`,
 - Full contract in `references/notion-sync.md`. Synthetic tests:
   `python3 -m pytest tests/ -q` (fake transport, no credentials).
 
+### 5. Optional: Feed personalization
+
+An opt-in default: ground the user's Muse Feed in the memory system so
+posts personalize from the profile, entity pages, and past coverage —
+every post says concretely why it matters to *this* user.
+
+- Read the profile, personalization notes, and the entity `INDEX.md`
+  files (`people/`, `groups/`, `topics/`, `interests/`, `locations/`,
+  `meetings/`, `activities/`); compose a feed prompt from the durable
+  interests, projects, routines, and money habits you find there.
+- Apply with `feed.prompt_update` (a real change starts a fresh
+  generation immediately). Re-ground when memory changes materially —
+  a monthly check inside the daily refresh is plenty.
+- The prompt is derived from memory, never new memory itself; public
+  examples stay synthetic and impersonal.
+- Full playbook in `references/feed-personalization.md`.
+
 ## Output Contract
 - Memory root contains: curated memory file, personalization notes,
   `people/`, `groups/`, `topics/`, `meetings/`, `activities/`, `interests/`,

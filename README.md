@@ -230,6 +230,16 @@ snapshot, and simultaneous edits on both sides become conflicts where both
 versions are preserved and neither is overwritten. Fully tested with a fake
 Notion transport (`python3 -m pytest tests/ -q`) — no credentials needed.
 
+## Optional: Feed personalization from memory
+
+Ground the user's Muse Feed in the memory system so posts personalize
+from the profile, entity pages, and past coverage — every post says
+concretely why it matters to *them*, instead of leaning on generic
+hooks. The skill reads the durable interests, projects, routines, and
+money habits out of memory, composes a grounded feed prompt, and
+applies it (`feed.prompt_update`); it re-grounds when memory changes
+materially. Full playbook: `references/feed-personalization.md`.
+
 ## Layout
 
 ```

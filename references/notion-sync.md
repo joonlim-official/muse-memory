@@ -37,11 +37,41 @@ human-friendly editing surface.
   are rolled back (local files restored, remote pages restored to their prior
   blocks or archived when newly created) before the error surfaces, so a
   failed sync never leaves a half-applied state.
-- **Push is full-page replacement.** A local edit replaces the whole Notion
-  page: all blocks except child pages are deleted, then the new tree is
-  appended. Child pages are preserved; per-block comments or history on the
-  replaced blocks are not. When the canonical content is unchanged the
-  replacement is skipped entirely (no API calls).
+- **Push is incremental.** A local edit is diffed against the page's current
+  blocks and only the difference is applied: changed blocks are updated in
+  place (block ids preserved), new blocks appended, removed blocks
+  archived. Blocks the sync cannot represent (child pages, images, embeds,
+  …) are never touched. Per-block comments or history on replaced or
+  archived blocks are not preserved. When the canonical content is
+  unchanged the push makes zero write API calls.
+- **Reorder is positional.** The differ aligns blocks positionally — blank
+  lines anchor the alignment only where they sit at the same index on
+  both sides, so adding/removing a blank line never cascades churn into
+  later blocks; same-type blocks at aligned positions are updated in
+  place, so reorders keep every block id stable. The Notion API has no
+  move operation.
+- **Round-trip fidelity.** Local → Notion → local is byte-identical except
+  for documented normalizations: H4–H6 map to H3 (Notion has three heading
+  levels — the only lossy case, deterministic and stable on re-parse);
+  `*`/`+` bullets become `-`, list indentation becomes 2 spaces per level,
+  and numbered values restart at 1 (Notion stores no marker, indentation,
+  or numbered value — `canonical()` treats all of these as equal, so they
+  never churn a sync); `***`/`___` dividers become `---`, `:---` table
+  alignment becomes `---`, `__bold__` becomes `**bold**`; Notion
+  normalizes link URLs on write (lowercases scheme/host, appends `/` to
+  bare domains — `canonical()` treats pre/post forms as equal, so this
+  never churns a sync; after a pull the local file carries Notion's
+  form); trailing blank lines collapse to the single final newline.
+  Blank-line runs, nested-list structure, code-block indentation, leading
+  whitespace, quotes, todos, dividers, tables, and inline formatting all
+  survive byte-identical. No invisible characters are used anywhere in
+  the encoding.
+- **Live API notes (verified 2026-09-23).** The append endpoint rejects
+  nested `children` in the payload (400), so child blocks are appended
+  to their created parent in a second pass, recursively; a table block
+  can only be created with its rows nested inside `table.children`;
+  prepending uses the typed position object `{"position":
+  {"type": "start"}}` (omitting `after` appends at the end).
 - **Deletions are never destructive.** A Notion page archived or deleted for
   a mapped file is reported; the local file is preserved.
 - **New pages are adopted safely.** An unmapped hub child titled like a valid

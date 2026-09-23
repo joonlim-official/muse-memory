@@ -187,13 +187,16 @@ def test_meaningful_blank_lines_preserved():
 def test_headings_all_levels():
     text = "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6\n"
     blocks = md.parse_markdown(text)
-    types = [b["type"] for b in blocks]
-    # Notion only has 3 heading levels; H4-H6 degrade to heading_3
+    types = [b["type"] for b in blocks if b["type"] != "empty"]
+    # Notion only has 3 heading levels; H4-H6 map to heading_3
+    # (documented fidelity exception: re-parsing the output is stable)
     assert types == ["heading_1", "heading_2", "heading_3",
                      "heading_3", "heading_3", "heading_3"]
     out = md.blocks_to_markdown(blocks)
     assert md.canonical_text(out) == md.canonical_text(
         "# H1\n## H2\n### H3\n### H4\n### H5\n### H6\n")
+    # second pass is stable: no further degradation
+    assert md.blocks_to_markdown(md.parse_markdown(out)) == out
 
 
 def test_unicode_and_links():
@@ -674,7 +677,7 @@ def test_restore_accounting_exact(tmp_path):
     engine, transport, cfg = make_engine(tmp_path)
     write_mem(cfg, "MEMORY.md", "# Memory\n")
     write_mem(cfg, "memory/people/jane-doe.md", "# Jane Doe\n")
-    # double blank line: Notion round-trip normalizes it away
+    # blank-line runs now survive the Notion round-trip byte-identical
     write_mem(cfg, "memory/people/john-smith.md", "# John Smith\n\n\nBody.\n")
     write_mem(cfg, "memory/people/temp.md", "# Temp\n")
     engine.init()
@@ -690,8 +693,8 @@ def test_restore_accounting_exact(tmp_path):
     staging = str(tmp_path / "staging")
     rpt = engine.restore(snap_id, staging)
     assert rpt["total"] == 4
-    assert rpt["byte_identical"] == 1          # jane-doe.md
-    assert rpt["equivalent"] == 1              # john-smith.md (blanks)
+    assert rpt["byte_identical"] == 2          # jane-doe.md, john-smith.md
+    assert rpt["equivalent"] == 0
     assert rpt["mismatches"] == [("MEMORY.md", "content differs")]
     assert rpt["snapshot_only"] == ["memory/people/temp.md"]
     assert rpt["live_only"] == ["memory/people/brand-new.md"]
@@ -804,3 +807,437 @@ def test_cli_version_through_wrapper(tmp_path):
     p = _run_cli(env, "version")
     assert p.returncode == 0
     assert "notion-sync" in p.stdout
+
+
+# ---------------------------------------------------------------------------
+# round-trip fidelity: local -> Notion -> local byte equality
+# ---------------------------------------------------------------------------
+
+def _notion_round_trip(text):
+    blocks = md.parse_markdown(text)
+    api = tp.blocks_to_notion(blocks)
+    return md.blocks_to_markdown(tp.notion_to_blocks(api))
+
+
+# Comprehensive synthetic fixture. Canonical list style is used because
+# Notion stores no bullet marker, indentation, or numbered value of its
+# own: through Notion, markers normalize to "-", indentation to 2 spaces
+# per level, and numbered values restart at 1 (all documented in
+# references/notion-sync.md; canonical() treats them as equal).
+FIDELITY_FIXTURE = """\
+---
+title: Sync fidelity fixture
+---
+
+# Heading one
+
+## Heading two
+
+### Heading three
+
+Two blank lines above this paragraph.
+
+
+Three blank lines above.
+
+  A paragraph with two leading spaces.
+
+- bullet one
+- bullet two
+  - nested two spaces
+    - nested four spaces
+  - back to level one
+
+1. first
+1. second
+  1. nested numbered
+  1. second nested
+1. third
+
+- [ ] unchecked todo
+- [x] checked todo
+  - [ ] nested todo
+
+> A quote.
+> spanning two lines
+>
+> after a blank quote line
+
+---
+
+```python
+def hello():
+    return "indented four spaces"
+```
+
+Some `inline code`, **bold**, *italic*, ~~strike~~, and a [link](https://example.com).
+
+| Name | City |
+| --- | --- |
+| Ana | Seoul |
+| Bo | Paris \\| not a split |
+
+Final paragraph.
+"""
+
+
+def test_fidelity_fixture_byte_identical():
+    out = _notion_round_trip(FIDELITY_FIXTURE)
+    assert out == FIDELITY_FIXTURE
+    # second pass is stable: the round-trip is idempotent
+    assert _notion_round_trip(out) == out
+    # no invisible-character hacks anywhere in the encoding
+    assert "\u200b" not in out and "\ufeff" not in out
+
+
+def test_numbered_values_normalize_through_notion():
+    # Notion keeps no numbered value; on pull every item reads back as 1.
+    # canonical() treats the values as equal, so this never churns a sync.
+    out = _notion_round_trip("1. first\n2. second\n5. fifth\n")
+    assert out == "1. first\n1. second\n1. fifth\n"
+    assert md.canonical_text("1. first\n2. second\n5. fifth\n") == \
+        md.canonical_text(out)
+
+
+def test_list_markers_normalize_through_notion():
+    out = _notion_round_trip("* star\n+ plus\n- dash\n")
+    assert out == "- star\n- plus\n- dash\n"
+    assert md.canonical_text("* star\n+ plus\n- dash\n") == \
+        md.canonical_text(out)
+
+
+def test_h4_h6_documented_exception():
+    # Notion has three heading levels. H4-H6 map to heading_3: the only
+    # lossy case, deterministic and stable on re-parse. No
+    # invisible-character hacks are used to fake deeper levels.
+    out = _notion_round_trip("#### H4\n##### H5\n###### H6\n")
+    assert out == "### H4\n### H5\n### H6\n"
+    assert "\u200b" not in out and "\ufeff" not in out
+    assert _notion_round_trip(out) == out
+
+
+def test_local_round_trip_preserves_verbatim():
+    # parse -> render without Notion keeps markers, tab indentation,
+    # and numbered values exactly.
+    text = "* star\n+ plus\n\t- tab indented\n5. starts at five\n  3. nested\n"
+    assert md.blocks_to_markdown(md.parse_markdown(text)) == text
+
+
+def test_blank_line_runs_preserved():
+    text = "a\n\n\n\nb\n\n\nc\n"
+    assert _notion_round_trip(text) == text
+
+
+def test_code_indentation_preserved():
+    text = "```\n    four\n\tTab\n  two\n```\n"
+    assert _notion_round_trip(text) == text
+
+
+# ---------------------------------------------------------------------------
+# incremental block diff
+# ---------------------------------------------------------------------------
+
+def _synced_page(engine, transport, cfg, rel, text):
+    write_mem(cfg, rel, text)
+    code, _ = engine.init()
+    assert code == 0
+    code, _ = engine.sync()
+    assert code == 0
+    return engine.state.pages[rel]
+
+
+def _visible_ids(transport, page_id):
+    return [b["id"] for b in transport.list_blocks(page_id)]
+
+
+def _block_writes(transport):
+    return sum(transport.calls.get(k, 0)
+               for k in ("update_block", "delete_block", "append_api_blocks",
+                         "append_blocks", "replace_blocks"))
+
+
+def _remote_text(transport, page_id):
+    return md.blocks_to_markdown(
+        tp.notion_to_blocks(transport.list_blocks(page_id)))
+
+
+def test_push_noop_zero_write_calls(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    text = "# Title\n\nBody text.\n\n- item\n"
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md", text)
+    before = _block_writes(transport)
+    counts = engine.push_page(pid, md.parse_markdown(text))
+    assert counts == {"update": 0, "delete": 0, "insert": 0, "noop": True}
+    assert _block_writes(transport) == before
+
+
+def test_push_pure_append(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md",
+                       "# Title\n\nFirst.\n")
+    before_ids = _visible_ids(transport, pid)
+    write_mem(cfg, "MEMORY.md", "# Title\n\nFirst.\n\nAppended.\n")
+    code, report = engine.sync()
+    assert code == 0
+    counts = report["push_ops"]["MEMORY.md"]
+    assert counts["insert"] > 0 and counts["update"] == 0 \
+        and counts["delete"] == 0
+    after_ids = _visible_ids(transport, pid)
+    # existing blocks keep their ids and order; new blocks go at the end
+    assert after_ids[:len(before_ids)] == before_ids
+    assert _remote_text(transport, pid) == "# Title\n\nFirst.\n\nAppended.\n"
+
+
+def test_push_pure_delete_archives_only_target(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md",
+                       "# Title\n\nKeep.\n\nRemove me.\n")
+    before_ids = _visible_ids(transport, pid)
+    write_mem(cfg, "MEMORY.md", "# Title\n\nKeep.\n")
+    code, report = engine.sync()
+    assert code == 0
+    counts = report["push_ops"]["MEMORY.md"]
+    assert counts["delete"] > 0 and counts["update"] == 0 \
+        and counts["insert"] == 0
+    after_ids = _visible_ids(transport, pid)
+    assert set(after_ids) < set(before_ids)  # only removals, no additions
+    assert _remote_text(transport, pid) == "# Title\n\nKeep.\n"
+    # archived, not destroyed: the block still exists underneath
+    raw = transport.pages[pid]["blocks"]
+    assert any(b.get("archived") for b in raw)
+
+
+def test_push_same_type_update_preserves_id(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md",
+                       "# Title\n\nFirst.\n\nSecond.\n")
+    before_ids = _visible_ids(transport, pid)
+    writes_before = _block_writes(transport)
+    write_mem(cfg, "MEMORY.md", "# Title\n\nFirst edited.\n\nSecond.\n")
+    code, report = engine.sync()
+    assert code == 0
+    counts = report["push_ops"]["MEMORY.md"]
+    assert counts == {"update": 1, "delete": 0, "insert": 0, "noop": False}
+    # exactly one block write call for the whole push
+    assert _block_writes(transport) == writes_before + 1
+    assert _visible_ids(transport, pid) == before_ids
+    assert _remote_text(transport, pid) == \
+        "# Title\n\nFirst edited.\n\nSecond.\n"
+
+
+def test_push_type_change_replaces_block(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md",
+                       "# Title\n\nA paragraph.\n")
+    before_ids = _visible_ids(transport, pid)
+    write_mem(cfg, "MEMORY.md", "# Title\n\n## A heading now.\n")
+    code, report = engine.sync()
+    assert code == 0
+    counts = report["push_ops"]["MEMORY.md"]
+    assert counts["delete"] == 1 and counts["insert"] == 1 \
+        and counts["update"] == 0
+    after_ids = _visible_ids(transport, pid)
+    # ids are per block type: the paragraph id is gone, heading id is new,
+    # everything else kept
+    assert len(set(after_ids) & set(before_ids)) == len(before_ids) - 1
+    assert _remote_text(transport, pid) == "# Title\n\n## A heading now.\n"
+
+
+def test_canonical_treats_notion_url_normalization_as_equal():
+    # Notion lowercases scheme/host and appends "/" to bare domains on
+    # write (verified live 2026-09-23); that must never churn a sync.
+    a = md.canonical_text("[x](https://example.com)")
+    b = md.canonical_text("[x](https://example.com/)")
+    c = md.canonical_text("[x](HTTPS://EXAMPLE.COM)")
+    assert a == b == c
+    # ...but genuinely different URLs still differ
+    assert a != md.canonical_text("[x](https://example.com/other)")
+    assert a != md.canonical_text("[x](https://other.com/)")
+
+
+def test_push_insert_at_start_prepends(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md",
+                       "# Title\n\nBody.\n")
+    write_mem(cfg, "MEMORY.md", "New first block.\n\n# Title\n\nBody.\n")
+    code, report = engine.sync()
+    assert code == 0
+    assert _remote_text(transport, pid) == \
+        "New first block.\n\n# Title\n\nBody.\n"
+    first = transport.pages[pid]["blocks"][0]
+    assert first["type"] == "paragraph"
+
+
+def test_push_section_delete_no_churn(tmp_path):
+    # Deleting a middle section (blocks plus its trailing blank line)
+    # must delete only those blocks: blank anchors are positional, so
+    # removing a blank never cascades churn into later blocks.
+    engine, transport, cfg = make_engine(tmp_path)
+    text_a = ("# Title\n\nAlpha.\n\n- [ ] one\n- [x] two\n\n"
+              "> Quote.\n\n---\n\nFinal.\n")
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md", text_a)
+    ids_before = _visible_ids(transport, pid)
+    text_b = "# Title\n\nAlpha.\n\n> Quote.\n\n---\n\nFinal.\n"
+    write_mem(cfg, "MEMORY.md", text_b)
+    code, report = engine.sync()
+    assert code == 0
+    assert _remote_text(transport, pid) == text_b
+    ids_after = _visible_ids(transport, pid)
+    removed = [i for i in ids_before if i not in ids_after]
+    added = [i for i in ids_after if i not in ids_before]
+    assert len(removed) == 3  # two todos + the blank line after them
+    assert added == []
+
+
+def test_push_interleaved_replace_anchors_are_valid(tmp_path):
+    # Type-change runs emit delete;insert;delete;insert. Anchors must
+    # resolve to real block ids (the fake now raises on None, mirroring
+    # the live API's 400 on a null anchor).
+    engine, transport, cfg = make_engine(tmp_path)
+    text_a = "# A\n\npara one\n\npara two\n"
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md", text_a)
+    text_b = "## A\n\n> quote one\n\n> quote two\n"
+    write_mem(cfg, "MEMORY.md", text_b)
+    code, report = engine.sync()
+    assert code == 0
+    assert _remote_text(transport, pid) == text_b
+
+
+def test_push_reorder_updates_in_place(tmp_path):
+    # Reorder semantics: the differ aligns blocks positionally (blank
+    # lines act as anchors). Same-type blocks at aligned positions are
+    # updated in place, so a reorder preserves every block id — the
+    # Notion API has no move operation, and content rotation keeps ids
+    # stable instead of archiving/re-creating blocks.
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md",
+                       "# Title\n\nAlpha.\n\nBeta.\n")
+    before_ids = _visible_ids(transport, pid)
+    write_mem(cfg, "MEMORY.md", "# Title\n\nBeta.\n\nAlpha.\n")
+    code, report = engine.sync()
+    assert code == 0
+    counts = report["push_ops"]["MEMORY.md"]
+    assert counts == {"update": 2, "delete": 0, "insert": 0, "noop": False}
+    assert _remote_text(transport, pid) == "# Title\n\nBeta.\n\nAlpha.\n"
+    assert _visible_ids(transport, pid) == before_ids
+
+
+def test_push_far_move_keeps_ids(tmp_path):
+    # Moving the first section to the end: every aligned position is
+    # updated in place, so all ids survive and the end state is exact.
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md",
+                       "# T\n\nA.\n\nB.\n\nC.\n\nD.\n")
+    before_ids = _visible_ids(transport, pid)
+    write_mem(cfg, "MEMORY.md", "# T\n\nB.\n\nC.\n\nD.\n\nA.\n")
+    code, report = engine.sync()
+    assert code == 0
+    counts = report["push_ops"]["MEMORY.md"]
+    assert counts["delete"] == 0 and counts["insert"] == 0
+    assert counts["update"] == 4
+    assert _remote_text(transport, pid) == "# T\n\nB.\n\nC.\n\nD.\n\nA.\n"
+    assert _visible_ids(transport, pid) == before_ids
+
+
+def test_push_nested_child_update_single_write(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    text = "# Title\n\n- parent\n  - nested one\n  - nested two\n"
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md", text)
+    parent_before = transport.list_blocks(pid)[2]["id"]
+    kids_before = [c["id"] for c in
+                   transport.list_blocks(pid)[2]["_children"]]
+    write_mem(cfg, "MEMORY.md",
+              "# Title\n\n- parent\n  - nested ONE\n  - nested two\n")
+    writes_before = _block_writes(transport)
+    code, report = engine.sync()
+    assert code == 0
+    counts = report["push_ops"]["MEMORY.md"]
+    # only the changed child is rewritten; the parent keeps its id
+    # because its own content did not change
+    assert counts == {"update": 1, "delete": 0, "insert": 0, "noop": False}
+    assert _block_writes(transport) == writes_before + 1
+    parent_after = transport.list_blocks(pid)[2]
+    assert parent_after["id"] == parent_before
+    kids_after = [c["id"] for c in parent_after["_children"]]
+    assert kids_after[1] == kids_before[1]  # unchanged sibling keeps id
+    assert _remote_text(transport, pid) == \
+        "# Title\n\n- parent\n  - nested ONE\n  - nested two\n"
+
+
+def test_push_preserves_child_page_blocks(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md", "# Title\n")
+    # a child_page block the sync cannot represent
+    transport.pages[pid]["blocks"].append(
+        {"id": "fake-child-page-1", "type": "child_page",
+         "child_page": {"title": "Subpage"}})
+    write_mem(cfg, "MEMORY.md", "# Title\n\nNew body.\n")
+    code, report = engine.sync()
+    assert code == 0
+    assert report["push_ops"]["MEMORY.md"]["insert"] > 0
+    child = next(b for b in transport.list_blocks(pid)
+                 if b["type"] == "child_page")
+    assert child["id"] == "fake-child-page-1"
+    assert not child.get("archived")
+
+
+def test_push_preserves_unmanaged_block_types(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    pid = _synced_page(engine, transport, cfg, "MEMORY.md", "# Title\n")
+    transport.pages[pid]["blocks"].append(
+        {"id": "fake-image-1", "type": "image",
+         "image": {"type": "external",
+                   "external": {"url": "https://example.com/x.png"}}})
+    write_mem(cfg, "MEMORY.md", "# Title\n\nNew body.\n")
+    code, report = engine.sync()
+    assert code == 0
+    assert report["push_ops"]["MEMORY.md"]["insert"] > 0
+    img = next(b for b in transport.list_blocks(pid)
+               if b["type"] == "image")
+    assert img["id"] == "fake-image-1"
+    assert not img.get("archived")
+
+
+def test_push_mid_apply_failure_rolls_back(tmp_path):
+    engine, transport, cfg = make_engine(tmp_path)
+    text_a, text_b = "# A\n\nFirst.\n", "# B\n\nSecond.\n"
+    write_mem(cfg, "A.md", text_a)
+    write_mem(cfg, "B.md", text_b)
+    code, _ = engine.init()
+    assert code == 0
+    write_mem(cfg, "A.md", "# A\n\nFirst EDIT.\n")
+    write_mem(cfg, "B.md", "# B\n\nSecond EDIT.\n")
+    plan, local_files, remote = engine.plan()
+    assert plan.actionable() and len(plan.push) == 2
+    ids_before = {rel: _visible_ids(transport, engine.state.pages[rel])
+                  for rel in ("A.md", "B.md")}
+    transport.calls.clear()
+    transport.fail_on = ("update_block", 2)  # fail on the 2nd push only
+    with pytest.raises(tp.TransportError):
+        engine.apply(plan, local_files, remote)
+    transport.fail_on = None
+    # both incremental pushes rolled back: remotes keep old content+ids,
+    # local files keep the new content for retry, no snapshot advanced
+    for rel, text in (("A.md", text_a), ("B.md", text_b)):
+        pid = engine.state.pages[rel]
+        assert _remote_text(transport, pid) == text
+        assert _visible_ids(transport, pid) == ids_before[rel]
+    assert read_mem(cfg, "A.md") == "# A\n\nFirst EDIT.\n"
+    assert read_mem(cfg, "B.md") == "# B\n\nSecond EDIT.\n"
+    assert engine.state.snapshots == {}
+
+
+def test_cli_sync_incremental_push_exit_0(tmp_path):
+    env, mem = _cli_env(tmp_path)
+    (mem / "MEMORY.md").write_text("# Memory\n\nBody.\n")
+    assert _run_cli(env, "init").returncode == 0
+    assert _run_cli(env, "sync").returncode == 0
+    # one-paragraph edit -> incremental push, exit 0
+    (mem / "MEMORY.md").write_text("# Memory\n\nBody edited.\n")
+    p = _run_cli(env, "sync", "--json")
+    assert p.returncode == 0, p.stderr + p.stdout
+    body = json.loads(p.stdout)
+    assert body["push_ops"]["MEMORY.md"]["update"] == 1
+    # no-op push afterwards still exits 0
+    p = _run_cli(env, "sync")
+    assert p.returncode == 0, p.stderr + p.stdout

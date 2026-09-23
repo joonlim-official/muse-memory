@@ -42,6 +42,11 @@ _TYPE_MAP = {
     "callout": "callout",
 }
 
+#: Notion block types the sync can represent (and therefore diff).
+#: Anything else (child_page, image, embed, toggleable_heading, ...)
+#: is preserved untouched by incremental pushes.
+MANAGED_BLOCK_TYPES = frozenset(_TYPE_MAP.values())
+
 
 def _rich_to_notion(segs):
     out = []
@@ -106,6 +111,10 @@ def blocks_to_notion(blocks):
             })
             continue
         ntype = _TYPE_MAP.get(t)
+        if ntype is None and t == "empty":
+            # blank line <-> empty Notion paragraph (round-trips 1:1)
+            out.append({"type": "paragraph", "paragraph": {"rich_text": []}})
+            continue
         if ntype is None:
             # unknown: degrade to paragraph
             out.append({"type": "paragraph",
@@ -186,6 +195,11 @@ def notion_to_blocks(api_blocks):
         elif nb.get("children"):
             # blocks_to_notion nests children under "children"
             blk["children"] = notion_to_blocks(nb.get("children"))
+        if t == "paragraph" and not blk.get("children"):
+            # blank line: empty rich_text, or only empty-text segments
+            # (the API sometimes returns the latter for blank paragraphs)
+            if all(s["text"] == "" for s in rich):
+                blk = {"type": "empty"}
         out.append(blk)
     return out
 
@@ -296,7 +310,87 @@ class NotionTransport:
     # -- blocks ---------------------------------------------------------
     def get_blocks(self, page_id):
         """All blocks of a page, with nested children attached as _children."""
+        return self.list_blocks(page_id)
+
+    def list_blocks(self, page_id):
+        """Current block tree with ids, for incremental diffing.
+
+        Paginated; nested children attached as _children (table rows as
+        _table_rows). Archived blocks are not returned by the API.
+        """
         return self._load_children(page_id)
+
+    def update_block(self, block_id, payload):
+        """PATCH a block's content in place (id preserved).
+
+        payload is an API block dict; id/children keys are stripped —
+        only the block's own type data is updated, children untouched.
+        """
+        body = {k: v for k, v in payload.items()
+                if k not in ("id", "children", "_children", "_table_rows")}
+        return self._request("PATCH", f"/v1/blocks/{block_id}", body)
+
+    def delete_block(self, block_id):
+        """Archive a single block (its children go with it)."""
+        self._request("DELETE", f"/v1/blocks/{block_id}")
+
+    def append_api_blocks(self, parent_id, api_blocks, after="end"):
+        """Append API-format blocks under parent_id.
+
+        after: "end" (default) append at the end; "start" prepend;
+        otherwise a block id to insert directly after (scoped to that
+        parent's children). Returns the created top-level block ids in
+        order.
+
+        Children are wired in a second pass: the append endpoint
+        rejects nested top-level "children" in the payload (400), so each
+        level is appended flat and children are then appended to their
+        created parent block, recursively. Tables are the exception: a
+        table block can only be created with its rows nested inside
+        table.children, so _table_rows are inlined there (chunked past
+        100 rows via follow-up appends).
+        """
+        flat = []
+        for nb in api_blocks:
+            nb = dict(nb)
+            kids = nb.pop("children", None)
+            rows = nb.pop("_table_rows", None)
+            if rows is not None and nb.get("type") == "table":
+                nb["table"] = dict(nb.get("table", {}))
+                nb["table"]["children"] = rows[:100]
+                rows = rows[100:] or None
+            flat.append((nb, kids, rows))
+        created_ids = []
+        child_wiring = []  # (created id, child payloads) for the 2nd pass
+        anchor = after
+        for i in range(0, max(len(flat), 1), 100):
+            chunk = flat[i:i + 100]
+            if not chunk:
+                continue
+            body = {"children": [nb for nb, _kids, _rows in chunk]}
+            if anchor == "start":
+                # prepend: omission appends at the end; only the
+                # typed position object actually inserts at the start
+                # (verified live 2026-09-23).
+                body["position"] = {"type": "start"}
+            elif anchor != "end":
+                body["after"] = anchor
+            resp = self._request(
+                "PATCH", f"/v1/blocks/{parent_id}/children", body)
+            results = resp.get("results", [])
+            for (nb, kids, rows), res in zip(chunk, results):
+                cid = res.get("id")
+                created_ids.append(cid)
+                if kids:
+                    child_wiring.append((cid, kids))
+                if rows and res.get("type") == "table":
+                    for j in range(0, len(rows), 100):
+                        self._request(
+                            "PATCH", f"/v1/blocks/{cid}/children",
+                            {"children": rows[j:j + 100]})
+        for cid, kids in child_wiring:
+            self.append_api_blocks(cid, kids, after="end")
+        return created_ids
 
     def _load_children(self, block_id):
         blocks = self._paginate(
@@ -336,34 +430,8 @@ class NotionTransport:
         self.append_blocks(page_id, blocks)
 
     def append_blocks(self, page_id, blocks):
-        payload = blocks_to_notion(blocks)
-        # table rows must be appended as children of their table block.
-        # created[k] corresponds to chunk[k], so wire by position — this
-        # handles multiple tables in one batch correctly.
-        top = []
-        table_rows = []  # (index in top, row blocks)
-        for nb in payload:
-            rows = nb.pop("_table_rows", None)
-            if rows is not None:
-                table_rows.append((len(top), rows))
-            top.append(nb)
-        for i in range(0, max(len(top), 1), 100):
-            chunk = top[i:i + 100]
-            if not chunk:
-                continue
-            resp = self._request(
-                "PATCH", f"/v1/blocks/{page_id}/children",
-                {"children": chunk})
-            created = resp.get("results", [])
-            for idx, rows in table_rows:
-                if i <= idx < i + len(chunk) and rows:
-                    created_block = created[idx - i]
-                    if created_block.get("type") == "table":
-                        for j in range(0, len(rows), 100):
-                            self._request(
-                                "PATCH",
-                                f"/v1/blocks/{created_block['id']}/children",
-                                {"children": rows[j:j + 100]})
+        """Append internal-model blocks at the end of a page's children."""
+        self.append_api_blocks(page_id, blocks_to_notion(blocks), after="end")
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +484,15 @@ class FakeNotionTransport:
         self._next += 1
         return f"fake-page-{self._next:04d}"
 
+    def _normalize_children(self, blocks):
+        """Fold blocks_to_notion's nested "children" into "_children",
+        matching the shape the live transport returns from list_blocks."""
+        for b in blocks:
+            kids = b.pop("children", None)
+            if kids:
+                b["_children"] = kids
+            self._normalize_children(b.get("_children", []) or [])
+
     # -- pages ----------------------------------------------------------
     def get_page(self, page_id):
         self._maybe_fail("get_page")
@@ -456,14 +533,136 @@ class FakeNotionTransport:
         return out
 
     # -- blocks ---------------------------------------------------------
+    def _assign_ids(self, blocks):
+        """Give every stored block a stable fake id (recursively)."""
+        for b in blocks:
+            if not b.get("id"):
+                self._next += 1
+                b["id"] = f"fake-blk-{self._next:06d}"
+            self._assign_ids(b.get("_children", []) or [])
+            self._assign_ids(b.get("_table_rows", []) or [])
+            self._assign_ids(b.get("children", []) or [])
+
+    def _visible(self, blocks):
+        """Deep copy with archived blocks filtered out (like the API)."""
+        import copy
+        out = []
+        for b in blocks:
+            if b.get("archived"):
+                continue
+            nb = copy.deepcopy(b)
+            for key in ("_children", "_table_rows", "children"):
+                if isinstance(nb.get(key), list):
+                    nb[key] = self._visible(nb[key])
+            out.append(nb)
+        return out
+
+    def _find_block(self, block_id):
+        """Locate a block: (container_list, index, block, parent_id)."""
+        def rec(blocks, parent_id):
+            for idx, b in enumerate(blocks):
+                if b.get("id") == block_id:
+                    return (blocks, idx, b, parent_id)
+                for key in ("_children", "_table_rows", "children"):
+                    kids = b.get(key)
+                    if isinstance(kids, list):
+                        hit = rec(kids, b.get("id"))
+                        if hit:
+                            return hit
+            return None
+        for pid, page in self.pages.items():
+            hit = rec(page["blocks"], pid)
+            if hit:
+                return hit
+        return None
+
+    def write_calls(self):
+        """Count of write API calls made (for no-op push assertions)."""
+        return sum(self.calls.get(k, 0) for k in (
+            "update_block", "delete_block", "append_api_blocks",
+            "append_blocks", "replace_blocks", "create_page",
+            "archive_page"))
+
     def get_blocks(self, page_id):
         self._maybe_fail("get_blocks")
         try:
             page = self.pages[page_id]
         except KeyError:
             raise NotFound(f"not found: {page_id}")
+        return self._visible(page["blocks"])
+
+    def list_blocks(self, page_id):
+        self._maybe_fail("list_blocks")
+        try:
+            page = self.pages[page_id]
+        except KeyError:
+            raise NotFound(f"not found: {page_id}")
+        return self._visible(page["blocks"])
+
+    def update_block(self, block_id, payload):
+        self._maybe_fail("update_block")
         import copy
-        return copy.deepcopy(page["blocks"])
+        hit = self._find_block(block_id)
+        if hit is None or hit[2].get("archived"):
+            raise NotFound(f"not found: {block_id}")
+        _container, _idx, blk, _parent = hit
+        stripped = {k: copy.deepcopy(v) for k, v in payload.items()
+                    if k not in ("id", "children", "_children",
+                                 "_table_rows")}
+        blk.update(stripped)
+        self._save()
+
+    def delete_block(self, block_id):
+        self._maybe_fail("delete_block")
+        hit = self._find_block(block_id)
+        if hit is None or hit[2].get("archived"):
+            raise NotFound(f"not found: {block_id}")
+        hit[2]["archived"] = True
+        self._save()
+
+    def append_api_blocks(self, parent_id, api_blocks, after="end"):
+        self._maybe_fail("append_api_blocks")
+        if after is None:
+            # The live API 400s on a null anchor; fail loudly here so
+            # tests catch anchor-resolution bugs instead of masking them.
+            raise ValueError("after must be 'start', 'end', or a block id")
+        import copy
+        new = copy.deepcopy(api_blocks)
+        self._assign_ids(new)
+        self._normalize_children(new)
+        # resolve the parent's child container
+        if parent_id in self.pages:
+            container = self.pages[parent_id]["blocks"]
+        else:
+            hit = self._find_block(parent_id)
+            if hit is None or hit[2].get("archived"):
+                raise NotFound(f"not found: {parent_id}")
+            blk = hit[2]
+            key = "_table_rows" if blk.get("type") == "table" else "_children"
+            container = blk.setdefault(key, [])
+        # wire table rows as children of their table block
+        top, table_rows = [], []
+        for nb in new:
+            rows = nb.pop("_table_rows", None)
+            if rows is not None:
+                table_rows.append((len(top), rows))
+            top.append(nb)
+        if after == "start":
+            idx = 0
+        elif after == "end":
+            idx = len(container)
+        else:
+            idx = next((i + 1 for i, b in enumerate(container)
+                        if b.get("id") == after and not b.get("archived")),
+                       len(container))
+        ids = []
+        for k, nb in enumerate(top):
+            container.insert(idx + k, nb)
+            ids.append(nb["id"])
+        for tindex, rows in table_rows:
+            container[idx + tindex].setdefault("_table_rows", []).extend(rows)
+        self._save()
+        return ids
 
     def replace_blocks(self, page_id, blocks):
         self._maybe_fail("replace_blocks")
@@ -474,18 +673,21 @@ class FakeNotionTransport:
         new_api = copy.deepcopy(blocks_to_notion(blocks))
         try:
             old_api = self.pages[page_id]["blocks"]
-            if (md.canonical(notion_to_blocks(old_api))
+            if (md.canonical(notion_to_blocks(self._visible(old_api)))
                     == md.canonical(notion_to_blocks(new_api))):
                 return  # no-op: canonically identical, like the live transport
         except Exception:
             pass
-        self.pages[page_id]["blocks"] = new_api
+        # full replacement: drop everything except child_page blocks
+        # (deleting a child_page would trash the subpage)
+        kept = [b for b in self.pages[page_id]["blocks"]
+                if b.get("type") == "child_page" and not b.get("archived")]
+        self._assign_ids(new_api)
+        self._normalize_children(new_api)
+        self.pages[page_id]["blocks"] = kept + new_api
         self.replaced += 1
         self._save()
 
     def append_blocks(self, page_id, blocks):
         self._maybe_fail("append_blocks")
-        import copy
-        self.pages[page_id]["blocks"].extend(
-            copy.deepcopy(blocks_to_notion(blocks)))
-        self._save()
+        self.append_api_blocks(page_id, blocks_to_notion(blocks), after="end")

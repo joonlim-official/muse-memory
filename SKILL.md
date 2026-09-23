@@ -68,6 +68,10 @@ An opt-in, stdlib-only Python component (`lib/notion_sync/`,
 - Notion hosts a persistent **live page tree** (one page per managed file)
   that a human can read and edit; Markdown files remain operational storage.
 - Local edits push to Notion; manual Notion edits pull back (guard-scanned).
+- Pushes are incremental block diffs (changed blocks updated in place,
+  ids preserved; zero write calls when nothing changed), and local →
+  Notion → local round-trips byte-identical except for documented
+  normalizations (H4–H6 → H3 is the only lossy case).
 - Every successful sync also writes a dated recovery snapshot page.
 - Three-way reconciliation (base vs local vs remote): simultaneous edits
   are **conflicts — both versions preserved, neither overwritten**; the sync

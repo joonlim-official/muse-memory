@@ -254,7 +254,11 @@ A stdlib-only Python component (`bin/memory-notion-sync`, see
 Notion hosts a persistent live page tree you can edit by hand, Markdown
 files remain the operational storage, every sync writes a dated recovery
 snapshot, and simultaneous edits on both sides become conflicts where both
-versions are preserved and neither is overwritten. Fully tested with a fake
+versions are preserved and neither is overwritten. Pushes are incremental
+block diffs (changed blocks updated in place with ids preserved; zero
+write API calls when nothing changed), and local → Notion → local
+round-trips byte-identical except for documented normalizations
+(H4–H6 → H3 is the only lossy case). Fully tested with a fake
 Notion transport (`python3 -m pytest tests/ -q`) — no credentials needed.
 
 ## Optional: Feed personalization from memory

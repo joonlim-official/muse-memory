@@ -12,7 +12,7 @@ not changes. The decision matrix:
     local changed | remote changed | action
     --------------+----------------+-------------------------------
     no            | no             | clean
-    yes           | no             | push local -> Notion (full-page replacement)
+    yes           | no             | push local -> Notion (incremental block diff)
     no            | yes            | pull Notion -> local (guard-scanned)
     yes           | yes            | CONFLICT: preserve both, write neither
 
@@ -35,10 +35,13 @@ mid-apply, completed steps are rolled back in reverse order (local files
 restored, remote pages restored to their prior blocks or archived when
 newly created), so a failed sync never leaves a half-applied state.
 
-Push is full-page replacement on the Notion side: all blocks except
-child pages are deleted and the new tree is appended (child pages are
-preserved; per-block comments/history on replaced blocks are not). When
-the canonical content is unchanged the replacement is skipped.
+Push is incremental on the Notion side: the page's current blocks are
+diffed against the desired tree and only changed blocks are updated in
+place (block ids preserved), new blocks appended, and removed blocks
+archived. Notion-native blocks the sync cannot represent (child pages,
+images, embeds, ...) are never touched; per-block comments/history on
+replaced or archived blocks are not preserved. When the canonical
+content is unchanged the push makes zero write API calls.
 """
 
 import fnmatch
@@ -51,6 +54,7 @@ import tempfile
 
 from . import markdown as md
 from . import transport as tp
+from . import diff as _diff
 from .config import Config
 
 # ---------------------------------------------------------------------------
@@ -114,6 +118,17 @@ class _RollbackJournal:
     def note_remote_replace(self, page_id, orig_api_blocks):
         self._entries.append(("remote_replace", (page_id, orig_api_blocks)))
 
+    def note_remote_update(self, block_id, orig_update_payload):
+        """orig_update_payload: update_block payload restoring the content."""
+        self._entries.append(("remote_update", (block_id, orig_update_payload)))
+
+    def note_remote_delete(self, parent_id, after, orig_payload):
+        """orig_payload: API block dict (children nested) to re-append."""
+        self._entries.append(("remote_delete", (parent_id, after, orig_payload)))
+
+    def note_remote_append(self, block_id):
+        self._entries.append(("remote_append", block_id))
+
     def note_remote_create(self, page_id):
         self._entries.append(("remote_create", page_id))
 
@@ -138,6 +153,17 @@ class _RollbackJournal:
                     page_id, orig_api = payload
                     engine.tp.replace_blocks(
                         page_id, tp.notion_to_blocks(orig_api))
+                elif kind == "remote_update":
+                    block_id, orig_payload = payload
+                    engine.tp.update_block(block_id, orig_payload)
+                elif kind == "remote_delete":
+                    parent_id, after, orig_payload = payload
+                    if after is _diff.PREV:
+                        after = "end"  # best effort: position not guaranteed
+                    engine.tp.append_api_blocks(parent_id, [orig_payload],
+                                                after=after)
+                elif kind == "remote_append":
+                    engine.tp.delete_block(payload)
                 elif kind == "remote_create":
                     engine.tp.archive_page(payload)
                 elif kind == "state_page_add":
@@ -541,6 +567,65 @@ class Engine:
     def _guard_outgoing(self, _rel, text):
         return self._guard_incoming(_rel, text)
 
+    # -- incremental push -------------------------------------------------
+    def push_page(self, page_id, blocks, journal=None):
+        """Push desired blocks to a page with a minimal incremental diff.
+
+        The page's current blocks are diffed against the desired tree;
+        only changed blocks are updated in place (ids preserved), new
+        blocks appended, removed blocks archived. Canonically unchanged
+        blocks are never rewritten — when the whole page is unchanged
+        this makes zero write API calls. Child pages and Notion-native
+        blocks the sync cannot represent (images, embeds, ...) are left
+        untouched.
+
+        Every mutation is noted on journal (when given) before it
+        happens, so a later failure rolls the page back. Returns op
+        counts: {"update", "delete", "insert", "noop"}.
+        """
+        current_api = self.tp.list_blocks(page_id)
+        managed = [b for b in current_api
+                   if b.get("type") in tp.MANAGED_BLOCK_TYPES]
+        if md.canonical(tp.notion_to_blocks(managed)) == md.canonical(blocks):
+            return {"update": 0, "delete": 0, "insert": 0, "noop": True}
+        payloads = tp.blocks_to_notion(blocks)
+        ops = _diff.diff_blocks(managed, payloads, page_id)
+        counts = {"update": 0, "delete": 0, "insert": 0, "noop": False}
+        # PREV chaining: the id created by each parent's most recent
+        # insert. Keyed by parent because child-level ops for other
+        # parents interleave in the op list; never reset by updates or
+        # deletes, which do not affect "after the last inserted block".
+        pending = {}
+        for op in ops:
+            kind = op["op"]
+            if kind == "update":
+                if journal is not None:
+                    journal.note_remote_update(
+                        op["id"], _diff.update_payload_for(op["orig"]))
+                self.tp.update_block(op["id"], op["payload"])
+                counts["update"] += 1
+            elif kind == "delete":
+                if journal is not None:
+                    journal.note_remote_delete(
+                        op["parent"], op["after"],
+                        tp.blocks_to_notion(
+                            tp.notion_to_blocks([op["orig"]]))[0])
+                self.tp.delete_block(op["id"])
+                counts["delete"] += 1
+            elif kind == "insert":
+                after = op["after"]
+                if after is _diff.PREV:
+                    after = pending.get(op["parent"], "end")
+                new_ids = self.tp.append_api_blocks(
+                    op["parent"], op["payloads"], after=after)
+                if journal is not None:
+                    for nid in new_ids:
+                        journal.note_remote_append(nid)
+                counts["insert"] += len(new_ids)
+                if new_ids:
+                    pending[op["parent"]] = new_ids[-1]
+        return counts
+
     # -- apply ----------------------------------------------------------
     def apply(self, plan, local_files, remote):
         """Apply a fully actionable plan. Returns a report dict.
@@ -554,6 +639,7 @@ class Engine:
         sync state exactly as they were.
         """
         report = {"pulled": [], "pushed": [], "created": [], "adopted": [],
+                  "push_ops": {},
                   "index_updated": [], "index_missing": []}
         journal = _RollbackJournal()
         try:
@@ -565,19 +651,14 @@ class Engine:
                 self._write_local(local_files[rel], text)
                 report["pulled"].append(rel)
 
-            # 2. push local-only changes (full-page replacement remotely)
+            # 2. push local-only changes (incremental block diff remotely)
             for rel in plan.push:
                 page_id = self.state.pages[rel]
-                try:
-                    orig_api = self.tp.get_blocks(page_id)
-                except tp.TransportError as e:
-                    raise SyncError(
-                        f"push failed for {rel}: cannot read original: {e}")
                 text = self.read_local(local_files[rel])
                 blocks = md.parse_markdown(text)
-                journal.note_remote_replace(page_id, orig_api)
-                self.tp.replace_blocks(page_id, blocks)
+                op_counts = self.push_page(page_id, blocks, journal)
                 report["pushed"].append(rel)
+                report["push_ops"][rel] = op_counts
 
             # 3. create pages for new local files
             for rel in plan.new_local:
@@ -586,7 +667,7 @@ class Engine:
                 page_id = self.tp.create_page(self.cfg.hub_id, rel)
                 journal.note_remote_create(page_id)
                 journal.note_state_page_add(self.state, rel)
-                self.tp.replace_blocks(page_id, blocks)
+                self.push_page(page_id, blocks)  # fresh page: no rollback needed
                 self.state.pages[rel] = page_id
                 report["created"].append(rel)
 
@@ -853,7 +934,7 @@ class Engine:
                 except tp.TransportError as e:
                     raise SyncError(f"init failed reading {rel}: {e}")
                 if not remote_text.strip():
-                    self.tp.replace_blocks(page_id, blocks)
+                    self.push_page(page_id, blocks)
                     self.state.pages[rel] = page_id
                     report["seeded_existing"].append(rel)
                 elif (md.canonical_text(remote_text)
@@ -865,7 +946,7 @@ class Engine:
                     continue
             else:
                 page_id = self.tp.create_page(self.cfg.hub_id, rel)
-                self.tp.replace_blocks(page_id, blocks)
+                self.push_page(page_id, blocks)
                 self.state.pages[rel] = page_id
                 report["created"].append(rel)
         stage = tempfile.mkdtemp(prefix="notion-sync-base-",

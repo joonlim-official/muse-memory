@@ -52,8 +52,15 @@ PHONE_RE='\b(\+?1[-. ]?)?\(?[0-9]{3}\)?[-. ][0-9]{3}[-. ][0-9]{4}\b'
 
 if [ "$#" -gt 0 ]; then
   INPUT=$(cat -- "$@" 2>/dev/null)
+elif [ ! -t 0 ] && IFS= read -r -t 2 _firstline <&0; then
+  # Piped draft. The timeout probe keeps a no-args invocation on an idle
+  # pipe (cron, $(...)) from hanging on `cat` forever — the same class of
+  # hang fixed in memory-guard on 2026-09-22. No production caller uses
+  # this path (gates pass a file), but a hang here is never the right
+  # answer for an empty payload: empty input is clean by definition.
+  INPUT="$_firstline"$'\n'"$(cat)"
 else
-  INPUT=$(cat)
+  INPUT=""
 fi
 
 status=0

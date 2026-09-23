@@ -5,6 +5,9 @@
 # Usage: memory-guard [path ...] | memory-guard --help
 #   no args + piped stdin: scan the piped draft (echo <draft> | memory-guard)
 #   no args + terminal:    the standard memory tree, excluding runtime-managed bank/
+#   no args + stdin with no data (cron, $(...), /dev/null, idle pipe):
+#                          the standard memory tree — never hang, never
+#                          false-clean on an empty temp file
 # Env:
 #   PERSONAL_MEMORY_ROOT   memory root (default: $HOME)
 #   MEMORY_FIGURE_ALLOWLIST
@@ -39,6 +42,8 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "  Pre-write / audit scan for memory content."
   echo "  no args + piped stdin: scan the piped draft"
   echo "  no args + terminal:    scan the standard memory tree"
+  echo "  no args + stdin with no data (cron, \$(...), idle pipe):"
+  echo "                         scan the standard memory tree"
   echo "  exit 0 = clean, 1 = secrets found (block the write),"
   echo "  2 = financial figures / personal data only (flag for human review)."
   exit 0
@@ -51,21 +56,35 @@ STDIN_TMP=""
 cleanup() { [ -n "${STDIN_TMP:-}" ] && rm -f "$STDIN_TMP"; }
 trap cleanup EXIT
 
+tree_targets() { # stdout: one candidate target per line (caller reads into TARGETS)
+  printf '%s\n' "$ROOT/MEMORY.md" "$ROOT/memory/personalization.md" \
+    "$ROOT/memory/INDEX.md" "$ROOT/memory/people" \
+    "$ROOT/memory/groups" "$ROOT/memory/topics" \
+    "$ROOT/memory/trace"
+  # daily logs, if any
+  for f in "$ROOT"/memory/20*.md; do [ -e "$f" ] && printf '%s\n' "$f"; done
+}
+
 if [ "$#" -gt 0 ]; then
   TARGETS=("$@")
 elif [ ! -t 0 ]; then
-  # Piped draft: scan the piped content, not the default tree — a silent
-  # tree scan here would report a false clean on content never examined.
+  # Non-terminal stdin is not necessarily a piped draft: it is also what
+  # $(...) and cron give us, where stdin may be /dev/null or an idle pipe.
+  # A blind `cat` hangs forever on an idle pipe (it wedged memory-audit
+  # inside $(...) on 2026-09-22), and a /dev/null stdin would scan an
+  # empty temp file and report a false clean. Probe for data with a short
+  # timeout; no data means the documented no-args behavior: the tree scan.
   STDIN_TMP="$(mktemp)"
-  cat > "$STDIN_TMP"
-  TARGETS=("$STDIN_TMP")
+  if IFS= read -r -t 2 _firstline <&0; then
+    printf '%s\n' "$_firstline" > "$STDIN_TMP"
+    cat >> "$STDIN_TMP"
+    TARGETS=("$STDIN_TMP")
+  else
+    rm -f "$STDIN_TMP"; STDIN_TMP=""
+    mapfile -t TARGETS < <(tree_targets)
+  fi
 else
-  TARGETS=("$ROOT/MEMORY.md" "$ROOT/memory/personalization.md"
-           "$ROOT/memory/INDEX.md" "$ROOT/memory/people"
-           "$ROOT/memory/groups" "$ROOT/memory/topics"
-           "$ROOT/memory/trace")
-  # daily logs, if any
-  for f in "$ROOT"/memory/20*.md; do [ -e "$f" ] && TARGETS+=("$f"); done
+  mapfile -t TARGETS < <(tree_targets)
 fi
 
 SECRET_RE='sk-[A-Za-z0-9]{20,}|sk_(live|test)_[A-Za-z0-9]{10,}|AIza[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_.-]{20,}|AKIA[0-9A-Z]{16}|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|api[ _-]?key["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9_.-]{16,}|password["'"'"' ]*[:=]["'"'"' ]*[^ ]+|passwd["'"'"' ]*[:=]'

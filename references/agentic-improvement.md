@@ -79,6 +79,26 @@ An iteration is done when, in order:
 
 ## History
 
+- 2026-09-22 (night): third iteration — no-args stdin hang/false-clean in
+  both gates. The nightly run wedged: `memory-audit` calls `memory-guard`
+  with no args inside `$(...)`, where stdin is a non-tty idle pipe, and
+  the old `[ ! -t 0 ]` branch did a blind `cat` that blocked forever
+  (the 22:00 run never finished; killed after diagnosis). The same branch
+  on a `/dev/null` stdin — the normal cron case — would scan an empty
+  temp file and report a false clean. Fix: no-args + non-tty stdin now
+  probes for data with a 2s `read -t`; real piped drafts behave as
+  before, no data falls back to the documented tree scan (guard) or
+  empty input = clean (egress check, where no production caller uses
+  stdin). Same hardening applied to `memory-egress-check`'s `INPUT=$(cat)`
+  for the identical latent hang. 3 new regression tests in
+  `leakage-audit` (idle-pipe fifo: guard finds a planted synthetic secret
+  via the tree fallback, clean tree rc=0, egress rc=0 — all timeout-
+  guarded). Validation: bash -n clean, leakage-audit CLEAN 97/97,
+  adversarial-run 38/38, memory-audit completes (exit 1 only on the
+  already-classified figure set). Also instance-fixed the 6th
+  UTC-misfiling (a chat session filed verified-extraction blocks under
+  2026-09-23.md; merged into 2026-09-22.md, misdated file to recoverable
+  trash).
 - 2026-09-17 (night): second iteration — over-gating fix for auditor-ruled
   public classes. The nightly audit kept flagging MU stock prices and two
   public business numbers Joon had ruled public that same day

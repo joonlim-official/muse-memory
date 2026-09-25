@@ -293,7 +293,9 @@ bin/
                     logging and the approval-override path
   brief-gate        runs the egress check on subagent briefs before spawning
   memory-audit      nightly audit: format, expiry, stale threads, drift,
-                    dating, watermark — evaluates, never writes
+                    dating, watermark — evaluates; its only write is
+                    auto-healing UTC-misdated daily logs (merge +
+                    recoverable trash)
   memory-retrieval-test
                     weekly retrieval self-test: sample queries against
                     memory-grep, checks each finds its expected home

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # memory-audit: deterministic nightly audit of the personal memory system.
-# Evaluates the disciplines; never writes to memory files.
+# Evaluates the disciplines; the only write it ever performs is auto-healing
+# UTC-misfiled daily logs (merge into today's log, misdated file moved to a
+# recoverable trash dir). Everything else is read-only.
 # Usage: memory-audit [memory-root] | memory-audit --help
 #   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
 #   Set $MEMORY_WATERMARK_FILE to also check the refresh job's watermark
@@ -10,6 +12,9 @@
 #     "Today" is always the user's local date, never the machine's clock —
 #     a 10 PM run on a UTC machine must not read tomorrow's date.
 #     Defaults to $TZ, then UTC. Installations should set this explicitly.
+#   MEMORY_AUDIT_TRASH_DIR
+#     where auto-healed misdated logs are moved (recoverable; not
+#     auto-expired). Defaults to $ROOT/.audit-trash.
 # Exit: 0 = clean, 1 = issues found, 2 = secrets found (from memory-guard).
 set -u
 
@@ -18,7 +23,8 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "  Deterministic nightly audit: guard scan, trace format, expiry,"
   echo "  stale open threads, duplication drift, daily-log dating,"
   echo "  refresh watermark, installation literals absent from skill."
-  echo "  Never writes to memory files."
+  echo "  Read-only except auto-healing UTC-misfiled daily logs"
+  echo "  (merge into today's log; misdated file -> recoverable trash)."
   echo "  exit 0 = clean, 1 = issues found, 2 = secrets found."
   exit 0
 fi
@@ -146,12 +152,45 @@ if [ -f "$MEM/$TODAY.md" ]; then
 else
   flag "today's daily log ($TODAY.md) is missing."
 fi
+# Auto-heal (the audit's only write path): UTC-misfiled future logs are
+# merged into today's log with a provenance marker, and the misdated file
+# is moved to a recoverable trash dir. Only strict YYYY-MM-DD names are
+# healed; anything else keeps the old flag. Past logs are history — never
+# touched.
+TRASH_DIR="${MEMORY_AUDIT_TRASH_DIR:-$ROOT/.audit-trash}"
 future="$(find "$MEM" -maxdepth 1 -name '20*.md' | while read -r f; do
   b="$(basename "$f" .md)"
   if [[ "$b" > "$TODAY" ]]; then echo "$b"; fi
-done)"
+done | sort)"
 if [ -n "$future" ]; then
-  flag "future-dated log(s): $(printf '%s' "$future" | tr '\n' ' ')"
+  mkdir -p "$TRASH_DIR" 2>/dev/null \
+    || flag "cannot create trash dir $TRASH_DIR — future logs left in place."
+  issues_before=$ISSUES
+  healed=0
+  while IFS= read -r b; do
+    [ -d "$TRASH_DIR" ] || continue
+    f="$MEM/$b.md"
+    [ -f "$f" ] || continue
+    if ! [[ "$b" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+      flag "future-dated log with non-date name: $b.md (not auto-healed)"
+      continue
+    fi
+    dest="$TRASH_DIR/$b.md"
+    [ -e "$dest" ] && dest="$TRASH_DIR/$b.$(date +%s).md"
+    if [ -s "$f" ]; then
+      { printf '\n<!-- memory-audit auto-heal %s: merged misdated log %s (UTC-misfiled) -->\n' "$TODAY" "$b.md"
+        cat "$f"; } >> "$MEM/$TODAY.md" 2>/dev/null \
+        && mv "$f" "$dest" 2>/dev/null && [ ! -e "$f" ] \
+        && { say "  healed — merged $b.md into $TODAY.md; misdated file -> $dest"; healed=1; } \
+        || flag "failed to heal $b.md (left in place)"
+    else
+      mv "$f" "$dest" 2>/dev/null && [ ! -e "$f" ] \
+        && { say "  healed — empty misdated log $b.md -> $dest"; healed=1; } \
+        || flag "failed to move empty $b.md to trash (left in place)"
+    fi
+  done <<< "$future"
+  [ "$healed" -eq 1 ] && [ "$ISSUES" -eq "$issues_before" ] \
+    && say "  ok — no future-dated logs remain."
 else
   say "  ok — no future-dated logs."
 fi

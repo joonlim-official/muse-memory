@@ -136,13 +136,15 @@ what action is needed — nothing else.
 ## Job 3 — Nightly evaluation (optional but recommended)
 
 A short nightly audit that verifies the memory system is holding its
-disciplines. It EVALUATES ONLY — it never writes to memory files. This is
+disciplines. It evaluates, and performs exactly one mechanical write:
+auto-healing UTC-misfiled daily logs (merges them into today's log and
+moves the misdated file to a recoverable trash dir). This is
 the job that catches drift the daily refresh missed. The skill ships
 `bin/memory-audit`, which runs the checks deterministically.
 
 ```markdown
-Nightly evaluation of the personal memory system. This job evaluates
-only — it never writes to memory files. Stay silent unless something
+Nightly evaluation of the personal memory system. This job evaluates;
+its only write is auto-healing UTC-misfiled daily logs. Stay silent unless something
 needs the user's attention.
 
 1. Run `bin/memory-audit [memory-root]` (set $MEMORY_WATERMARK_FILE to

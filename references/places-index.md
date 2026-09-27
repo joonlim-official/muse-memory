@@ -32,6 +32,48 @@ from a search into a lookup.
   - `## Related`: links to the person/group/topic pages the place
     connects to.
 
+## Discovery: build it from your own data — never ask for a list
+
+Never start by asking the user to enumerate their places. They will
+under-report, and you get a chore, not an index. Mine the data sources
+the memory already has access to and build the candidate list yourself.
+The user only confirms or corrects facts that only they hold.
+
+Sources, in rough order of yield:
+
+1. **Transaction history** (bank/card aggregation): pull a trailing
+   window (e.g. 12 months) and rank merchants by frequency. Count
+   *distinct charge-days* per merchant — and never call a charge a
+   "visit" at this stage. Multi-branch chains need branch
+   disambiguation from each transaction's location field; do not crown
+   the most common branch as "the" branch without repeated
+   branch-specific evidence. Delivery apps, subscription billings, and
+   gift-card reloads are orders, not visits (see Evidence types).
+2. **Email receipts and order confirmations**: separate delivery from
+   pickup from subscription. An emailed order confirmation proves an
+   order, not a physical visit. Search trash/deleted mail too — users
+   delete mail, and the deleted copies can hold what the live inbox
+   doesn't.
+3. **Calendars**: recurring events name venues (training grounds,
+   schools, workplaces) with real addresses and real cadence.
+4. **Tax and employment documents**: filed tax returns aggregate wages
+   without naming employers — the W-2s themselves carry the employer
+   name and address. When a workplace is unknown, check the user's file
+   storage for W-2 PDFs; extract only the employer name and workplace
+   facts, never SSNs, EINs, or compensation figures.
+5. **Existing memory**: person, group, and topic pages already name
+   venues — harvest them into the candidate list.
+
+Then apply the significance bar: a page is created when a place
+**recurs** across sources or time. One-off charges, single deliveries,
+and places that appear only in planning threads never become pages.
+
+Privacy while researching: amounts, account identifiers, tax IDs, and
+credentials stay out of location pages — dates and frequencies only.
+Shred temporary working files that touched tax documents or full
+transaction exports when the research is done; don't leave them in
+/tmp.
+
 ## The recall procedure
 
 Whenever a location entity comes up in a turn:

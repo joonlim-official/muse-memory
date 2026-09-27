@@ -53,6 +53,25 @@ daily log instead.
   durable (a coach and their training ground).
 - The central profile links the index from its household section.
 
+## Evidence types: visit vs order vs plan
+
+A charge is not a visit. When mining receipts or transaction histories
+for places, keep three evidence kinds strictly separate:
+
+- `## Visits` — in-person presence only (dated log lines like the schema
+  above). A delivery order, a shipped subscription box, or a gift-card
+  reload is never a visit.
+- `## Orders` (optional section) — delivery/takeout order history, one
+  line per order with date and source. Useful for "where do we order
+  from?" without polluting the visit log.
+- Plans and suggestions ("we should try X", trip-planning shortlists)
+  stay out of place pages entirely — file them in the daily log until a
+  real visit or order happens.
+
+Receipt mining builds the candidate list (frequency-ranked merchants),
+but the page records only what the evidence supports, and never stores
+amounts — frequencies and dates only.
+
 ## Maintenance
 
 - Log visits as they happen — a visit log reconstructed months late is a

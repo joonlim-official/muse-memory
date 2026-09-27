@@ -22,7 +22,8 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "usage: memory-audit [memory-root]"
   echo "  Deterministic nightly audit: guard scan, trace format, expiry,"
   echo "  stale open threads, duplication drift, daily-log dating,"
-  echo "  refresh watermark, installation literals absent from skill."
+  echo "  refresh watermark, installation literals absent from skill,"
+  echo "  index integrity (dangling refs, locations page schema)."
   echo "  Read-only except auto-healing UTC-misfiled daily logs"
   echo "  (merge into today's log; misdated file -> recoverable trash)."
   echo "  exit 0 = clean, 1 = issues found, 2 = secrets found."
@@ -235,6 +236,65 @@ if [ -s "$DENYLIST" ]; then
 else
   say "  skipped — no egress denylist configured."
 fi
+say ""
+
+# 9. index integrity -------------------------------------------------------
+say "## 9. index integrity (dangling refs + locations page schema)"
+idx_tmp="$(mktemp)"
+# 9a. every backtick-quoted page path in an area INDEX.md must resolve to
+# a real file inside that area's own tree. Cross-area links are out of
+# scope here — only strict in-area refs are checked.
+for area in people groups topics meetings activities interests locations; do
+  idx="$MEM/$area/INDEX.md"
+  [ -f "$idx" ] || continue
+  grep -o '`[^`]*\.md`' "$idx" 2>/dev/null | tr -d '`' | while IFS= read -r p; do
+    case "$p" in
+      '~/memory/'*) target="$MEM/${p#\~/memory/}" ;;
+      '~/'*)        target="$ROOT/${p#\~/}" ;;
+      /*)           target="$p" ;;
+      *)            target="$MEM/$area/$p" ;;
+    esac
+    case "$target" in
+      "$MEM/$area/"*)
+        [ -f "$target" ] || printf 'dangling|%s|%s\n' "$area" "$p" >> "$idx_tmp" ;;
+    esac
+  done
+done
+# 9b. locations pages follow references/places-index.md: YAML frontmatter
+# (name/summary/updated), a "# " title, and ## Facts / ## Visits /
+# ## Related sections.
+if [ -d "$MEM/locations" ]; then
+  for f in "$MEM/locations/"*.md; do
+    [ -e "$f" ] || continue
+    [ "$(basename "$f")" = "INDEX.md" ] && continue
+    slug="$(basename "$f")"
+    head -12 "$f" | grep -q '^name:' \
+      || printf 'schema|%s|missing frontmatter name:\n' "$slug" >> "$idx_tmp"
+    head -12 "$f" | grep -q '^summary:' \
+      || printf 'schema|%s|missing frontmatter summary:\n' "$slug" >> "$idx_tmp"
+    head -12 "$f" | grep -qE '^updated: [0-9]{4}-[0-9]{2}-[0-9]{2}' \
+      || printf 'schema|%s|missing frontmatter updated: YYYY-MM-DD\n' "$slug" >> "$idx_tmp"
+    grep -q '^# ' "$f" \
+      || printf 'schema|%s|missing "# " title\n' "$slug" >> "$idx_tmp"
+    grep -q '^## Facts' "$f" \
+      || printf 'schema|%s|missing ## Facts\n' "$slug" >> "$idx_tmp"
+    grep -q '^## Visits' "$f" \
+      || printf 'schema|%s|missing ## Visits\n' "$slug" >> "$idx_tmp"
+    grep -q '^## Related' "$f" \
+      || printf 'schema|%s|missing ## Related\n' "$slug" >> "$idx_tmp"
+  done
+fi
+if [ -s "$idx_tmp" ]; then
+  while IFS='|' read -r kind area detail; do
+    case "$kind" in
+      dangling) flag "dangling ref in $area/INDEX.md -> $detail (page missing)" ;;
+      schema)   flag "locations/$area schema: $detail" ;;
+    esac
+  done < "$idx_tmp"
+else
+  say "  ok — no dangling index refs; locations pages match the schema."
+fi
+rm -f "$idx_tmp"
 say ""
 
 if [ "$ISSUES" -eq 0 ]; then

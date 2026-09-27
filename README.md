@@ -277,7 +277,8 @@ materially. Full playbook: `references/feed-personalization.md`.
 SKILL.md            the skill: setup, reading, writing, operating rules
 references/         layout & routing table · trace conventions ·
                     privacy & validation · cron templates ·
-                    feed personalization · notion sync
+                    feed personalization · notion sync ·
+                    visual index · places index
 assets/             starter templates: MEMORY.md, person/group/topic/
                     meeting/activity/interest/location pages,
                     personalization, trace + indexes

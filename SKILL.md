@@ -53,6 +53,12 @@ add-on).
   per `references/visual-index.md`; when the user sends a photo asking
   who is who, read the index and load the reference photos into context
   before matching — never identify from the text description alone.
+- Place recall: the assistant keeps no running sense of "where".
+  Maintain a places index (one page per significant place, with a dated
+  visit log) per `references/places-index.md`; when a location entity
+  comes up, resolve it against `locations/INDEX.md` and read the matching
+  page — index first, at most 1–3 pages per turn. Never promote a one-off
+  mention into a page.
 
 ### 3. Writing memory
 - Route each fact to its home — see the routing table in

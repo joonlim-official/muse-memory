@@ -48,6 +48,11 @@ add-on).
   profile, a meeting reference pulls its meeting profile, and so on.
   Nicknames and aliases resolve via the INDEX descriptions and
   `bin/memory-grep`. Budget: index first, at most 1–3 pages per turn.
+- Photo identification: the assistant keeps no visual memory between
+  turns. Maintain a visual index (reference photos + stable features)
+  per `references/visual-index.md`; when the user sends a photo asking
+  who is who, read the index and load the reference photos into context
+  before matching — never identify from the text description alone.
 
 ### 3. Writing memory
 - Route each fact to its home — see the routing table in

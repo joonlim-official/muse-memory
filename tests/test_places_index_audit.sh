@@ -107,6 +107,35 @@ status=$?
 echo "$out" | grep -q "no dangling index refs" \
   || { echo "FAIL C: clean bill not reported"; echo "$out"; fail=1; }
 
+# --- Phase E: template placeholders are not dangling refs -----------------
+cat > "$TMP/memory/locations/INDEX.md" <<'EOF'
+# Locations Index
+
+Filename convention: `YYYY-MM-DD-<slug>.md`.
+
+- **Cafe A** — `~/memory/locations/cafe-a.md` — neighborhood coffee shop.
+EOF
+write_cafe_full
+
+out="$("$SKILL_DIR/bin/memory-audit" "$TMP" 2>&1)"
+status=$?
+[ "$status" -eq 0 ] || { echo "FAIL E: exit $status (want 0)"; echo "$out"; fail=1; }
+echo "$out" | grep -q "! dangling ref" \
+  && { echo "FAIL E: template placeholder reported as dangling"; echo "$out"; fail=1; }
+
+# --- Phase F: auxiliary *_INDEX.md files are exempt from place schema ----
+cat > "$TMP/memory/locations/IMAGE_INDEX.md" <<'EOF'
+# Image Index
+
+A directory of photos, not a place page — no frontmatter, no sections.
+EOF
+
+out="$("$SKILL_DIR/bin/memory-audit" "$TMP" 2>&1)"
+status=$?
+[ "$status" -eq 0 ] || { echo "FAIL F: exit $status (want 0)"; echo "$out"; fail=1; }
+echo "$out" | grep -q "IMAGE_INDEX.md" \
+  && { echo "FAIL F: auxiliary index flagged against place schema"; echo "$out"; fail=1; }
+
 # --- Phase D: init-memory seeds the locations scaffold ------------------
 TMP2="$(mktemp -d)"
 "$SKILL_DIR/bin/init-memory" "$TMP2" >/dev/null 2>&1

@@ -31,6 +31,12 @@ from a search into a lookup.
     go there?".
   - `## Related`: links to the person/group/topic pages the place
     connects to.
+- Auxiliary index files (e.g. `locations/IMAGE_INDEX.md`, a photo
+  directory) are not place pages: they keep no frontmatter or the
+  sections above, and the audit exempts `*_INDEX.md` from the schema
+  check. A "Filename convention" line showing a template like
+  `YYYY-MM-DD-<slug>.md` in an area `INDEX.md` is not a page reference —
+  the audit skips backtick-quoted placeholders containing `<...>`.
 
 ## Discovery: build it from your own data — never ask for a list
 

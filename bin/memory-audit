@@ -243,12 +243,15 @@ say "## 9. index integrity (dangling refs + locations page schema)"
 idx_tmp="$(mktemp)"
 # 9a. every backtick-quoted page path in an area INDEX.md must resolve to
 # a real file inside that area's own tree. Cross-area links are out of
-# scope here — only strict in-area refs are checked.
+# scope here — only strict in-area refs are checked. Template placeholders
+# (e.g. `YYYY-MM-DD-<slug>.md` in a "Filename convention" line) are not
+# refs and are skipped.
 for area in people groups topics meetings activities interests locations; do
   idx="$MEM/$area/INDEX.md"
   [ -f "$idx" ] || continue
   grep -o '`[^`]*\.md`' "$idx" 2>/dev/null | tr -d '`' | while IFS= read -r p; do
     case "$p" in
+      *\<*|*\>*) continue ;; # template placeholder, not a page ref
       '~/memory/'*) target="$MEM/${p#\~/memory/}" ;;
       '~/'*)        target="$ROOT/${p#\~/}" ;;
       /*)           target="$p" ;;
@@ -262,12 +265,15 @@ for area in people groups topics meetings activities interests locations; do
 done
 # 9b. locations pages follow references/places-index.md: YAML frontmatter
 # (name/summary/updated), a "# " title, and ## Facts / ## Visits /
-# ## Related sections.
+# ## Related sections. Auxiliary index files (*_INDEX.md) are not place
+# pages and are exempt.
 if [ -d "$MEM/locations" ]; then
   for f in "$MEM/locations/"*.md; do
     [ -e "$f" ] || continue
-    [ "$(basename "$f")" = "INDEX.md" ] && continue
-    slug="$(basename "$f")"
+    bn="$(basename "$f")"
+    [ "$bn" = "INDEX.md" ] && continue
+    case "$bn" in *_INDEX.md) continue ;; esac
+    slug="$bn"
     head -12 "$f" | grep -q '^name:' \
       || printf 'schema|%s|missing frontmatter name:\n' "$slug" >> "$idx_tmp"
     head -12 "$f" | grep -q '^summary:' \

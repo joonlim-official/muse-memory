@@ -155,7 +155,9 @@ needs the user's attention.
    format, expired valid_until items still open (skips entries a
    closed/superseded entry already retired), open threads older than
    30 days, duplication drift across curated files, daily-log dating, and
-   the refresh watermark, and installation-sensitive literals absent from
+   the refresh watermark, router integrity (MEMORY.md stays a thin router
+   under the single-home rule — no substantive ## Facts / ## Preferences /
+   ## Commitments sections), and installation-sensitive literals absent from
    the public skill repo. It prints a markdown report and exits 0 clean /
    1 issues / 2 secrets.
    The figure check honors an installation-specific allowlist
@@ -166,6 +168,18 @@ needs the user's attention.
    curates this file by hand — never auto-populate it.
 2. Review the report. Secrets (exit 2) = alert the user immediately,
    naming file and line.
+3. Structural single-home eval: (a) router purity — memory-audit check 10
+   is the mechanical gate; if it flags, move the fact section to its
+   single-home page and leave a pointer; (b) paraphrased duplication —
+   sample the last 24h of writes and confirm no paraphrased duplicate of
+   the same fact exists elsewhere (check 5 only catches identical lines);
+   (c) wrong-layer facts — verify recent writes landed in the owning page
+   per the routing table; move stranded facts mechanically, pointer left
+   behind; (d) shadow-store check — the central profile is a derived view,
+   never a fact store; fold any profile-only facts into the owning indexed
+   page; (e) search-before-ask — note any case where a question to the user
+   could have been answered from memory; report patterns, never single
+   instances.
 
 SELF-FEEDBACK LOOP: the audit doesn't just report — it improves the
 system. For each finding, ask: is this an *instance* problem or a
@@ -232,3 +246,41 @@ bin/memory-notion-sync sync || exit 1
 If the weekly backup runs after this job, it must check this job's exit
 status first and skip the backup on any failure — a backup of a conflicted
 or partially synced tree is worse than no backup.
+
+## Job 5 (optional) — Task queue watchdog / enforcer
+
+Runs frequently (e.g. every 5 minutes). Keeps the assistant's FIFO task
+queue (`todo.md` at the memory root, plans in `todo-plans/`) executing
+until full completion — it enforces, not just watches.
+
+```markdown
+You are the todo-list watchdog AND enforcer. Make sure every task in the
+queue executes until FULL COMPLETION. Stay silent when everything is moving.
+
+1. Read `[memory root]/todo.md` in full (In Progress, Queued (FIFO),
+   Blocked, Done).
+2. Check signs of life: for any In Progress task, check mtime of its plan
+   file (`todo-plans/<slug>.md`) and any linked output files. No
+   modification in [stall threshold, e.g. 45 min] = STALLED (may be dropped).
+3. Enforce:
+   - Queue empty (In Progress + Queued both empty): stay silent.
+   - In Progress healthy (activity within threshold): stay silent.
+   - In Progress STALLED: first check for a live worker on that task (a
+     file-silent worker is not a dead worker). If none: re-read the plan,
+     spawn a worker to resume from the next incomplete step, annotate the
+     queue entry with the re-drive timestamp and count. The worker's brief
+     carries the plan path and the instruction to dequeue to Done (with
+     output link) when finished.
+   - Queued non-empty but In Progress empty: promote the next FIFO task to
+     In Progress and start it — unless every queued task was enqueued
+     within [grace period, e.g. 15 min] (just added, not yet picked up).
+   - Blocked items are not failures; act only if blocked >[e.g. 24h] with
+     no update — then report.
+4. Report: silent when healthy or self-healed (at most one short line noting
+   a corrective action). After [re-drive cap, e.g. 3] re-drives with no
+   completion: STOP re-driving, report to the user with the task slug and
+   the plan's next step. Never loop forever.
+```
+
+The template's bracketed values (cadence, stall threshold, grace period,
+re-drive cap) live in the installed cron body, never in the skill.

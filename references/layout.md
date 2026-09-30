@@ -11,8 +11,8 @@ accumulates over time; one fact lives in exactly one home.
 
 | Store | Holds | One page per… | Read when… |
 |---|---|---|---|
-| `~/MEMORY.md` | Curated long-term facts, preferences, commitments. Tight: promote only what lasts. | — | The durable core is needed |
-| `~/memory/personalization.md` | Distilled habits, patterns, standing preferences the system learned. | — | Behavior or taste is in play |
+| `~/MEMORY.md` | Thin router: identity + pointers to the indexes below. NOT a fact store. | — | A fact needs a home — start here |
+| `~/memory/personalization.md` | Distilled habits, patterns, standing preferences the system learned — about the user. | — | Behavior or taste is in play |
 | `~/memory/people/` + `INDEX.md` | Who someone is and how they relate to the user: family, friends, teachers, coaches, colleagues. | Identifiable person | That person comes up |
 | `~/memory/groups/` + `INDEX.md` | Communities and teams the user belongs to. | Community / team | That group comes up |
 | `~/memory/topics/` + `INDEX.md` | Tracked topics followed over time (e.g. health, travel, finance, home, hobbies). | Topic | That topic comes up |
@@ -23,7 +23,7 @@ accumulates over time; one fact lives in exactly one home.
 | `~/memory/trace/` + `INDEX.md` | Append-only temporal log, newest first. Top = latest knowledge; deeper = history. | — | "What changed / when did we decide…" |
 | `~/memory/YYYY-MM-DD.md` | Raw daily logs. Day-to-day detail that didn't make the cut for curated files. Writers append via `bin/memory-log-append` — never hand-compute the filename (UTC hosts misfile). | — | Day-level detail is needed |
 | `~/memory/bank/` | Runtime-managed reflections (if the platform provides them). Readable; do not edit directly. | — | — |
-| `<central-profile>` | One document describing the user (+ household), the single source of truth. Lives wherever the user keeps documents (e.g. a workspace your_files/ directory); link it from the memory INDEX.md. | — | The full user picture is needed |
+| `<central-profile>` | One document describing the user (+ household) — a DERIVED human-readable view of the indexed pages, not a fact store. Lives wherever the user keeps documents (e.g. a workspace your_files/ directory); link it from the memory INDEX.md. Never add a fact here that does not exist in the indexed pages. | — | The full user picture is needed |
 
 ## Environment
 
@@ -54,7 +54,8 @@ explicitly only to override that.
 | About a non-meeting memo/recording | `~/memory/activities/YYYY-MM-DD-<slug>.md` |
 | Evidence of a user interest | `~/memory/interests/<slug>.md` (only with real evidence — repeated time/attention or a clearly stated interest) |
 | About a significant place | `~/memory/locations/<slug>.md` (only for recurring places, not one-off mentions) |
-| Durable user fact or commitment | `~/MEMORY.md` + central profile |
+| Durable user identity fact (name, contact, home) | `~/MEMORY.md` (router) — mirrored once in the central profile |
+| Commitment, schedule, or time-bound plan | Goals / tracking; the owning person/topic/group page for context |
 | Preference or habit pattern | `~/memory/personalization.md` |
 | Day-to-day detail | `~/memory/<date>.md` |
 | Something changed / opened / closed | `~/memory/trace/trace.md` (plus the fact's home) |
@@ -62,9 +63,16 @@ explicitly only to override that.
 
 ## Principles
 
-- **One home per fact.** Family facts live in the central profile; topic
-  detail lives on topic pages. When the same fact appears in two places and
-  they drift, delete the copy and keep the canonical one.
+- **Single home per fact.** Every fact lives exactly once, in the indexed
+  file that owns it — never duplicated in MEMORY.md, the central profile,
+  or personalization. When the same fact appears in two places and they
+  drift, keep the copy in its single home and replace the other with a
+  pointer (never delete-and-lose). The central profile is a derived
+  reading view of the indexed pages, never an independent fact store.
+- **MEMORY.md is a router.** Identity + pointers to the indexes. If a
+  `## Facts` / `## Preferences` / `## Commitments` section starts
+  accumulating there, the facts belong in their single-home pages —
+  `bin/memory-audit` check 10 flags this mechanically.
 - **Curated files stay tight.** If a detail is only useful today, it belongs
   in the daily log, not in a curated file.
 - **Stale-prone facts carry dates.** Anything that can go stale (levels,

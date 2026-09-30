@@ -159,7 +159,7 @@ fi
 if [ -n "$figures" ]; then
   printf '%s\n' "$figures"
   [ "$status" -eq 0 ] && status=2
-  echo "Review: figures belong in the private dashboard/chat, not memory."
+  echo "Review: figures belong in the private dashboard/chat, or as dated as-of entries in the finance index — not elsewhere in memory."
 else
   echo "none"
 fi

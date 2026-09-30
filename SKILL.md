@@ -37,6 +37,10 @@ add-on).
 - Search BEFORE answering anything about prior work, decisions, dates,
   people, preferences, todos, ongoing work, or the user's history — and
   before recommending anything, even when the request mentions no history.
+- Search BEFORE asking, too: before asking the user for any fact (a name,
+  a date, a number), run the memory search/read first. If the answer is in
+  memory — or in a file the index points to — use it and cite the source;
+  ask only when memory genuinely doesn't have it.
 - Concepts ("what do we know about X?") → semantic search over the memory
   files (on Muse: `muse.memory_search`).
 - Exact identifiers (names, dates, confirmation numbers, addresses) →
@@ -61,8 +65,14 @@ add-on).
   mention into a page.
 
 ### 3. Writing memory
-- Route each fact to its home — see the routing table in
-  `references/layout.md`.
+- Route each fact to its SINGLE home — see the routing table in
+  `references/layout.md`. Every fact lives exactly once, in the indexed
+  file that owns it: person facts on the person's page, topic facts on the
+  topic page, the user's tastes/habits in personalization, operating rules
+  in the assistant's operating notes — never duplicated in `MEMORY.md` or
+  the central profile. `MEMORY.md` is a thin router (identity + pointers),
+  and the central profile is a derived human-readable view of the indexed
+  pages, never an independent fact store.
 - Every significant change gets a dated trace entry, newest first — see
   `references/trace-conventions.md`.
 - Follow `references/privacy-and-validation.md`: the approval rule, what
@@ -110,11 +120,40 @@ every post says concretely why it matters to *this* user.
   examples stay synthetic and impersonal.
 - Full playbook in `references/feed-personalization.md`.
 
+### 6. Optional: Task queue with completion-enforcing watchdog
+
+An opt-in FIFO task system that keeps the assistant's work executing until
+full completion — nothing stalls silently and nothing is dropped:
+
+- **Queue file** at the memory root (`todo.md`): `In Progress` (at most
+  one), `Queued (FIFO)`, `Blocked`, `Done`.
+- **Plan first:** every task gets a plan in `todo-plans/<slug>.md` before
+  any work starts; the queue links to the plan.
+- **Lifecycle:** work FIFO unless explicitly overridden; mark the active
+  task `in_progress` with the worker/activity reference; dequeue it to
+  Done (with the output link) when complete.
+- **Enforcer watchdog (scheduled job, e.g. every 5 minutes):** reads the
+  queue and the referenced plan/output files. It stays silent when the
+  queue is empty or the active task shows recent activity. When the active
+  task shows no file activity past the stall threshold (e.g. 45 minutes)
+  AND no live worker is on it, the watchdog re-drives the task: re-reads
+  the plan and respawns the worker from the next incomplete step. When
+  queued tasks wait with nothing in progress, it promotes the next FIFO
+  task and starts it. The threshold is a tripwire — it reports "may be
+  stalled," not "failed" — because the watchdog sees files, not live
+  agent state, so it checks for a running worker before re-driving.
+- **Re-drive cap:** after N re-drives (e.g. 3) with no completion, stop
+  and report to the user with the task slug and the plan's next step —
+  never loop forever.
+- Keep the schedule, thresholds, and cap in the cron body (see
+  `references/cron-templates.md`, Job 5), not in this skill.
+
 ## Output Contract
-- Memory root contains: curated memory file, personalization notes,
-  `people/`, `groups/`, `topics/`, `meetings/`, `activities/`, `interests/`,
-  `locations/` (each with an `INDEX.md`), `trace/`
-  (`INDEX.md` + append-only `trace.md`), and dated daily logs.
+- Memory root contains: a thin-router `MEMORY.md` (identity + pointers —
+  never a fact store), personalization notes, `people/`, `groups/`,
+  `topics/`, `meetings/`, `activities/`, `interests/`, `locations/` (each
+  with an `INDEX.md`), `trace/` (`INDEX.md` + append-only `trace.md`),
+  and dated daily logs.
 - `trace/trace.md` is append-only, newest first, every entry source-cited.
 - Three scheduled jobs keep the memory current: one daily collect/update/
   refine job, an optional lightweight watcher that surfaces urgent items

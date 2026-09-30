@@ -23,7 +23,8 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "  Deterministic nightly audit: guard scan, trace format, expiry,"
   echo "  stale open threads, duplication drift, daily-log dating,"
   echo "  refresh watermark, installation literals absent from skill,"
-  echo "  index integrity (dangling refs, locations page schema)."
+  echo "  index integrity (dangling refs, locations page schema),"
+  echo "  router integrity (MEMORY.md single-home rule)."
   echo "  Read-only except auto-healing UTC-misfiled daily logs"
   echo "  (merge into today's log; misdated file -> recoverable trash)."
   echo "  exit 0 = clean, 1 = issues found, 2 = secrets found."
@@ -301,6 +302,25 @@ else
   say "  ok — no dangling index refs; locations pages match the schema."
 fi
 rm -f "$idx_tmp"
+say ""
+
+# 10. router integrity (single-home rule) --------------------------------------
+say "## 10. router integrity (MEMORY.md is a router, not a fact store)"
+if [ -f "$ROOT/MEMORY.md" ]; then
+  drift=0
+  for h in "## Facts" "## Preferences" "## Commitments"; do
+    if grep -q "^$h" "$ROOT/MEMORY.md"; then
+      n="$(awk -v H="$h" '$0==H{f=1;next} f&&/^## /{exit} f&&NF{c++} END{print c+0}' "$ROOT/MEMORY.md")"
+      if [ "$n" -gt 5 ]; then
+        flag "MEMORY.md carries a substantive '$h' section ($n lines) — facts belong in their single-home topic/person/group page, not the router."
+        drift=1
+      fi
+    fi
+  done
+  [ "$drift" -eq 0 ] && say "  ok — MEMORY.md is a thin router (identity + pointers, no fact sections)."
+else
+  say "  skipped — no MEMORY.md at $ROOT."
+fi
 say ""
 
 if [ "$ISSUES" -eq 0 ]; then

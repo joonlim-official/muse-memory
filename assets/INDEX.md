@@ -3,10 +3,12 @@
 Map of the whole memory system. See the skill's `references/layout.md` for
 what lives where.
 
-- **Curated memory** — `~/MEMORY.md` — durable facts, preferences, commitments.
+- **Router** — `~/MEMORY.md` — thin router: identity + pointers to the
+  indexes below. NOT a fact store — every fact lives exactly once, in the
+  indexed page that owns it (single-home rule).
 - **Personalization** — `~/memory/personalization.md` — habits and patterns.
-- **Central profile** — [path to the user's profile document] — the single
-  source of truth for the user (+ household).
+- **Central profile** — [path to the user's profile document] — a derived
+  human-readable view of the indexed pages, never an independent fact store.
 - **People** — `~/memory/people/` ([INDEX.md](people/INDEX.md)) — one page
   per person.
 - **Groups** — `~/memory/groups/` ([INDEX.md](groups/INDEX.md)) — communities

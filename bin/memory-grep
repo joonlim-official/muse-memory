@@ -2,25 +2,42 @@
 # memory-grep: keyword search across the whole personal memory tree.
 # Semantic search is for concepts; this is for exact identifiers —
 # names, dates, confirmation numbers, addresses.
-# Usage: memory-grep <pattern> [context-lines] | memory-grep --help
+# Usage: memory-grep [--include-bank] <pattern> [context-lines] | memory-grep --help
 #   memory root defaults to $PERSONAL_MEMORY_ROOT, then $HOME.
 #   Set $PERSONAL_MEMORY_PROFILE to also search the central profile
 #   document (it lives outside the memory root by design).
 #   Set $MEMORY_GREP_MAX_LINES to override the 80-line output cap
 #   (the retrieval-test v2 harness lifts it to measure index recall;
 #   interactive use keeps the cap).
+#   The runtime-managed bank/ (reflections/world/experience/opinions) is
+#   EXCLUDED by default: it is an append-only mirror that duplicates
+#   curated content, so it dominates hit-count ranking and crowds the
+#   80-line cap without ever being a canonical home (no retrieval query
+#   expects a bank/ path; memory-guard's tree scan already excludes it).
+#   Pass --include-bank to search it explicitly when needed.
 set -u
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  echo "usage: memory-grep <pattern> [context-lines]"
+  echo "usage: memory-grep [--include-bank] <pattern> [context-lines]"
   echo "  Keyword search across the personal memory tree — for exact"
   echo "  identifiers (names, dates, confirmation numbers), not concepts."
   echo "  memory root defaults to \$PERSONAL_MEMORY_ROOT, then \$HOME."
+  echo "  bank/ (runtime reflections) is excluded unless --include-bank."
   exit 0
 fi
 
+INCLUDE_BANK=0
+ARGS=()
+for _a in "$@"; do
+  case "$_a" in
+    --include-bank) INCLUDE_BANK=1 ;;
+    *) ARGS+=("$_a") ;;
+  esac
+done
+set -- "${ARGS[@]:-}"
+
 ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
-PATTERN="${1:?usage: memory-grep <pattern> [context-lines]}"
+PATTERN="${1:?usage: memory-grep [--include-bank] <pattern> [context-lines]}"
 CTX="${2:-2}"
 if command -v rg >/dev/null 2>&1; then
   SEARCH=(rg -n -i -C "$CTX" --no-heading)
@@ -39,8 +56,12 @@ TARGETS=(
   "$ROOT/memory/interests"
   "$ROOT/memory/locations"
   "$ROOT/memory/trace"
-  "$ROOT/memory/bank"
 )
+# The runtime-managed bank/ is excluded by default (see header); opt in
+# explicitly with --include-bank.
+if [ "$INCLUDE_BANK" = "1" ]; then
+  TARGETS+=("$ROOT/memory/bank")
+fi
 # daily logs, if any
 for f in "$ROOT"/memory/20*.md; do [ -e "$f" ] && TARGETS+=("$f"); done
 # central profile lives outside the memory root; include it when set

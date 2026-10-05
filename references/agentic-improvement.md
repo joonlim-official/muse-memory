@@ -118,6 +118,38 @@ Semantic spot-checks use a fixed rubric with recorded verdicts.
 
 ## History
 
+- 2026-10-04 (night): fourth iteration — MRR regression trip + bank-noise
+  mechanism patch. The Sunday v2 suite tripped two quantified regression
+  rules (MRR 0.3499 → 0.2752, WoW drop 0.0747 > 0.05; two consecutive WoW
+  declines; deterministic across 3 re-runs — not a flake). Diagnosis found
+  two distinct root causes:
+  1. Stale query expectations (ground-truth maintenance gap): the 2026-09-30
+     single-home restructure moved durable facts out of MEMORY.md, but 16
+     queries still expected MEMORY.md (§1.3 requires re-homing with a
+     changelog entry when memory moves facts). Re-homed 17 queries to
+     their true current homes (f01 "trajbench" replaced by "Vetrano" — no
+     single curated home exists; it was already flagged as first
+     replacement candidate), each with a changelog entry; also folded the
+     orphaned "Hario V60" fact from the derived profile into
+     personalization.md (shadow-store fix, §11d).
+  2. Bank domination (mechanism): the runtime-managed bank/reflections.md
+     (8.7 MB append-only mirror of curated content) ranked #1 on nearly
+     every query under hit-count ranking and crowded the 80-line production
+     cap. Patch: `memory-grep` now excludes `memory/bank/` by default
+     (`--include-bank` opt-in) — consistent with memory-guard's tree scan,
+     which already excludes the bank; no v2 query expects a bank/ home.
+  3. Process gap fix: new memory-audit check 11 verifies every v2 query's
+     expected home still contains the query terms — it caught two more
+     stale ambiguous expectations (x03, x04) the same night it landed.
+  Validation: bash -n clean; leakage-audit CLEAN 97/97 (5 skipped);
+  adversarial-run 39/39; v2 suite 3× stable — HIT@3 0.771, MRR 0.669
+  (dev 0.647 / holdout 0.724, gap 0.077 < 0.1, holdout above dev — no
+  overfitting), Noise@3 2.062, abstention 1.000, p50 14ms/p95 19ms.
+  Trajectory: pre-patch MRR 0.2752 → post-patch 0.6693, both records
+  appended with notes. Residual honest FAILs kept (f07/m01/m03: ranking
+  cannot distinguish canonical homes from contextual mentions; no recency
+  signal for temporal "newest") — documented, not chased.
+
 - 2026-09-22 (night): third iteration — no-args stdin hang/false-clean in
   both gates. The nightly run wedged: `memory-audit` calls `memory-guard`
   with no args inside `$(...)`, where stdin is a non-tty idle pipe, and

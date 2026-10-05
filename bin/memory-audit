@@ -24,9 +24,13 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "  stale open threads, duplication drift, daily-log dating,"
   echo "  refresh watermark, installation literals absent from skill,"
   echo "  index integrity (dangling refs, locations page schema),"
-  echo "  router integrity (MEMORY.md single-home rule)."
+  echo "  router integrity (MEMORY.md single-home rule),"
+  echo "  retrieval query expectation staleness (v2 suite ground truth)."
   echo "  Read-only except auto-healing UTC-misfiled daily logs"
   echo "  (merge into today's log; misdated file -> recoverable trash)."
+  echo "  Set MEMORY_RETRIEVAL_QUERIES to the v2 query JSONL to enable"
+  echo "  check 11 (default: ~/workspace/goals/daily-memory-refresh/"
+  echo "  hidden_files/retrieval-queries-v2.jsonl when it exists)."
   echo "  exit 0 = clean, 1 = issues found, 2 = secrets found."
   exit 0
 fi
@@ -320,6 +324,77 @@ if [ -f "$ROOT/MEMORY.md" ]; then
   [ "$drift" -eq 0 ] && say "  ok — MEMORY.md is a thin router (identity + pointers, no fact sections)."
 else
   say "  skipped — no MEMORY.md at $ROOT."
+fi
+say ""
+
+# 11. retrieval query expectation staleness -----------------------------------
+# Ground-truth maintenance (eval framework §1.3): when memory moves a fact
+# to a new home, the v2 suite's expected home must follow with a changelog
+# entry. A query whose expected home no longer contains the query terms is
+# stale — it measures nothing. Added 2026-10-04 after the Sep-30
+# single-home restructure left 16 queries expecting MEMORY.md (found via
+# the MRR regression trip, fixed with changelog entries).
+say "## 11. retrieval query expectation staleness (v2 suite ground truth)"
+QFILE="${MEMORY_RETRIEVAL_QUERIES:-$ROOT/workspace/goals/daily-memory-refresh/hidden_files/retrieval-queries-v2.jsonl}"
+if [ -f "$QFILE" ]; then
+  stale_out="$(ROOT="$ROOT" QFILE="$QFILE" python3 - <<'PYEOF'
+import json, os, re, sys
+root = os.environ["ROOT"]
+stale = []
+try:
+    recs = [json.loads(l) for l in open(os.environ["QFILE"], encoding="utf-8")
+            if l.strip() and not l.startswith("#")]
+except (OSError, ValueError) as e:
+    print("ERROR|cannot parse query file: %s" % e)
+    sys.exit(0)
+for r in recs:
+    qid, query, expected = r.get("id"), r.get("query", ""), r.get("expected") or []
+    if not expected:
+        continue  # abstention stratum: nothing to go stale
+    try:
+        rx = re.compile(query, re.IGNORECASE)
+    except re.error:
+        stale.append("%s|query is not a valid regex: %s" % (qid, query))
+        continue
+    for frag in expected:
+        target = None
+        for cand in (os.path.join(root, frag), os.path.join(root, frag + ".md"),
+                     os.path.join(root, "memory", frag),
+                     os.path.join(root, "memory", frag + ".md")):
+            if os.path.isfile(cand):
+                target = cand
+                break
+        if target is None:
+            stale.append("%s|expected home missing from tree: %s" % (qid, frag))
+            continue
+        try:
+            with open(target, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            stale.append("%s|cannot read expected home: %s" % (qid, frag))
+            continue
+        if not rx.search(text):
+            stale.append("%s|expected home no longer contains the query terms: %s" % (qid, frag))
+for s in stale:
+    print("STALE|" + s)
+print("CHECKED|%d" % len(recs))
+PYEOF
+)"
+  if printf '%s' "$stale_out" | grep -q '^ERROR|'; then
+    flag "$(printf '%s' "$stale_out" | grep '^ERROR|' | cut -d'|' -f2- | head -1)"
+  else
+    n_stale="$(printf '%s' "$stale_out" | grep -c '^STALE|' || true)"
+    n_checked="$(printf '%s' "$stale_out" | grep '^CHECKED|' | cut -d'|' -f2)"
+    if [ "$n_stale" -gt 0 ]; then
+      printf '%s' "$stale_out" | grep '^STALE|' | cut -d'|' -f2- | while IFS='|' read -r qid detail; do
+        flag "stale v2 expectation [$qid]: $detail — re-home with a changelog entry (framework §1.3)."
+      done
+    else
+      say "  ok — all $n_checked v2 queries have live expected homes."
+    fi
+  fi
+else
+  say "  skipped — v2 query file not found (set MEMORY_RETRIEVAL_QUERIES)."
 fi
 say ""
 

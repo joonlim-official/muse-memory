@@ -119,10 +119,18 @@ if [ -f "$MEM/trace/trace.md" ]; then
   while IFS= read -r line; do
     d="$(printf '%s' "$line" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | tail -1)"
     if [ -n "$d" ] && [[ "$d" < "$CUTOFF" ]]; then
+      # skip entries already closed/superseded: the leading status token says
+      # the thread is dead even when the body quotes the word "open" (backtick
+      # code spans are stripped before matching so status-vocabulary mentions
+      # like `open` in the trace-format entry do not trip the check)
+      status="$(printf '%s' "$line" | sed -E 's/^- \[[^]]+\] ([^ |]+).*/\1/')"
+      case "$status" in
+        closed|superseded|\[x\]*) continue ;;
+      esac
       flag "stale open thread (src date $d): $(printf '%s' "$line" | cut -c1-100)"
       stale=1
     fi
-  done < <(grep '^- \[.*open' "$MEM/trace/trace.md")
+  done < <(sed 's/`[^`]*`//g' "$MEM/trace/trace.md" | grep '^- \[.*open')
   [ "$stale" -eq 0 ] && say "  ok — no open thread older than 30 days."
 fi
 say ""

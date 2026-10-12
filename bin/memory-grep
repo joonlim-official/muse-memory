@@ -55,6 +55,7 @@ TARGETS=(
   "$ROOT/memory/activities"
   "$ROOT/memory/interests"
   "$ROOT/memory/locations"
+  "$ROOT/memory/events"
   "$ROOT/memory/trace"
 )
 # The runtime-managed bank/ is excluded by default (see header); opt in

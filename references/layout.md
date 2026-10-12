@@ -20,6 +20,7 @@ accumulates over time; one fact lives in exactly one home.
 | `~/memory/locations/` + `INDEX.md` | Significant places (home, school, venues, workplaces, frequent destinations): address, what happens there, durable facts. | Recurring place | That place comes up |
 | `~/memory/meetings/` + `INDEX.md` | Significant meetings, calls, or recorded conversations: date, participants, source, summary, decisions, commitments, follow-ups. | Event with other people | That meeting comes up |
 | `~/memory/activities/` + `INDEX.md` | Notable non-meeting memos or recordings: voice memos, errands, workout or lesson notes. | Solo memo / recording | That activity comes up |
+| `~/memory/events/` | Deep-investigation dossiers (3+ sources): one file per event/trip/project, confidence-tagged (`confirmed`/`reported`/`inferred`), governed by `_TEMPLATE.md`. Thin records are stubs, excluded from trust. | Investigated event | That event's full picture is needed |
 | `~/memory/trace/` + `INDEX.md` | Append-only temporal log, newest first. Top = latest knowledge; deeper = history. | — | "What changed / when did we decide…" |
 | `~/memory/YYYY-MM-DD.md` | Raw daily logs. Day-to-day detail that didn't make the cut for curated files. Writers append via `bin/memory-log-append` — never hand-compute the filename (UTC hosts misfile). | — | Day-level detail is needed |
 | `~/memory/bank/` | Runtime-managed reflections (if the platform provides them). Readable; do not edit directly. | — | — |
@@ -52,6 +53,7 @@ explicitly only to override that.
 | About a tracked topic | `~/memory/topics/<topic>.md` |
 | About a significant meeting/call | `~/memory/meetings/YYYY-MM-DD-<slug>.md` |
 | About a non-meeting memo/recording | `~/memory/activities/YYYY-MM-DD-<slug>.md` |
+| About a deep investigation (3+ sources, confidence-tagged) | `~/memory/events/<slug>.md` (dossier; template `_TEMPLATE.md`; thin records stay stubs) |
 | Evidence of a user interest | `~/memory/interests/<slug>.md` (only with real evidence — repeated time/attention or a clearly stated interest) |
 | About a significant place | `~/memory/locations/<slug>.md` (only for recurring places, not one-off mentions) |
 | Durable user identity fact (name, contact, home) | `~/MEMORY.md` (router) — mirrored once in the central profile |

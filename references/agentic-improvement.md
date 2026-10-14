@@ -118,6 +118,23 @@ Semantic spot-checks use a fixed rubric with recorded verdicts.
 
 ## History
 
+- 2026-10-13 (night): fifth iteration — memory-audit check 4 precision,
+  second pass. The 2026-10-11 patch skipped closed/superseded/[x] entries,
+  but the input filter still matched ANY trace line containing the word
+  "open", so body mentions kept tripping it as they aged past 30 days:
+  3 false positives in one night (a Sep 12 audit summary quoting "open
+  threads … all healthy", a Sep 12 dedupe entry, the Sep 11 swim entry
+  that "partially closes the swimming open thread"). Fix: check 4 now
+  matches only entries whose typed status token is exactly `open |`
+  (trace-conventions.md) — the status field is the thread state, body
+  vocabulary is not. New regression test
+  `tests/test_memory_audit_stale_open.sh`: body-mention entries stay
+  clean, a true stale `open` entry still flags (exactly once). Real-tree
+  re-run: §4 clean; the genuinely-open typed entries (2026-09-18/24) are
+  <30 days old and will flag correctly when they age. Validation:
+  bash -n clean; router + heal tests pass; leakage-audit CLEAN 97/97
+  (5 skipped); adversarial-run 39/39.
+
 - 2026-10-04 (night): fourth iteration — MRR regression trip + bank-noise
   mechanism patch. The Sunday v2 suite tripped two quantified regression
   rules (MRR 0.3499 → 0.2752, WoW drop 0.0747 > 0.05; two consecutive WoW

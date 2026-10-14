@@ -119,10 +119,14 @@ if [ -f "$MEM/trace/trace.md" ]; then
   while IFS= read -r line; do
     d="$(printf '%s' "$line" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | tail -1)"
     if [ -n "$d" ] && [[ "$d" < "$CUTOFF" ]]; then
-      # skip entries already closed/superseded: the leading status token says
-      # the thread is dead even when the body quotes the word "open" (backtick
-      # code spans are stripped before matching so status-vocabulary mentions
-      # like `open` in the trace-format entry do not trip the check)
+      # Only the typed status token counts: the input filter below matches
+      # entries whose status is exactly `open |` (trace-conventions.md), so
+      # body mentions of the word "open" — audit summaries quoting "open
+      # threads", entries that "close the open thread", historical schedule
+      # notes — never trip this check (2026-10-13: 3 such false positives in
+      # one night, all Sep 11–12 entries whose bodies mentioned open threads
+      # that were already resolved). The closed/superseded skip below stays
+      # as defense in depth.
       status="$(printf '%s' "$line" | sed -E 's/^- \[[^]]+\] ([^ |]+).*/\1/')"
       case "$status" in
         closed|superseded|\[x\]*) continue ;;
@@ -130,7 +134,7 @@ if [ -f "$MEM/trace/trace.md" ]; then
       flag "stale open thread (src date $d): $(printf '%s' "$line" | cut -c1-100)"
       stale=1
     fi
-  done < <(sed 's/`[^`]*`//g' "$MEM/trace/trace.md" | grep '^- \[.*open')
+  done < <(sed 's/`[^`]*`//g' "$MEM/trace/trace.md" | grep -E '^- \[[^]]+\] open \|')
   [ "$stale" -eq 0 ] && say "  ok — no open thread older than 30 days."
 fi
 say ""

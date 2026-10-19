@@ -15,6 +15,19 @@
 #   80-line cap without ever being a canonical home (no retrieval query
 #   expects a bank/ path; memory-guard's tree scan already excludes it).
 #   Pass --include-bank to search it explicitly when needed.
+#
+# RANKING TIERS (Joon's rule, 2026-10-18): curated pages are the canonical
+# homes and are ALWAYS prioritized over daily logs when the keyword
+# matches. Output is emitted in tiers — curated memory, then the central
+# profile, then daily logs, then bank/ (when included) — each tier sorted
+# before the output cap applies, so the cap truncates diary hits before
+# it ever truncates a curated home. Within the daily-log tier, each log
+# file contributes at most ONE match line (its first, with context): a
+# log can still point at the day something happened, but diary volume can
+# never outrank the curated page that owns the fact. Root cause: the
+# 2026-10-18 retrieval evaluation — accumulating daily logs' raw hit
+# counts buried curated homes (e.g. locations/372-virginia-ave.md ranked
+# 22nd for "372 Virginia" under a pile of log mentions).
 set -u
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -23,6 +36,8 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   echo "  identifiers (names, dates, confirmation numbers), not concepts."
   echo "  memory root defaults to \$PERSONAL_MEMORY_ROOT, then \$HOME."
   echo "  bank/ (runtime reflections) is excluded unless --include-bank."
+  echo "  Curated pages rank above daily logs; each daily log contributes"
+  echo "  at most one match line (its first)."
   exit 0
 fi
 
@@ -40,11 +55,35 @@ ROOT="${PERSONAL_MEMORY_ROOT:-$HOME}"
 PATTERN="${1:?usage: memory-grep [--include-bank] <pattern> [context-lines]}"
 CTX="${2:-2}"
 if command -v rg >/dev/null 2>&1; then
-  SEARCH=(rg -n -i -C "$CTX" --no-heading)
+  ENGINE=rg
 else
-  SEARCH=(grep -r -n -i -C "$CTX")
+  ENGINE=grep
 fi
-TARGETS=(
+
+# One search pass over a target group. $1 = per-file match cap for the
+# group (0 = uncapped). Output is sorted so each tier is deterministic
+# run-to-run (rg's parallel traversal order is nondeterministic; an
+# unsorted head -80 could drop different lines on identical input — root
+# cause of the 2026-09-20 "Taekwon Kids" flaky miss, diagnosed 2026-09-23).
+run_group() {
+  local cap="$1"; shift
+  [ "$#" -gt 0 ] || return 0
+  if [ "$ENGINE" = "rg" ]; then
+    if [ "$cap" -gt 0 ]; then
+      rg -n -i -C "$CTX" --no-heading --max-count "$cap" "$PATTERN" "$@" 2>/dev/null
+    else
+      rg -n -i -C "$CTX" --no-heading "$PATTERN" "$@" 2>/dev/null
+    fi
+  else
+    if [ "$cap" -gt 0 ]; then
+      grep -r -n -i -C "$CTX" -m "$cap" "$PATTERN" "$@" 2>/dev/null
+    else
+      grep -r -n -i -C "$CTX" "$PATTERN" "$@" 2>/dev/null
+    fi
+  fi | LC_ALL=C sort
+}
+
+CURATED=(
   "$ROOT/MEMORY.md"
   "$ROOT/memory/personalization.md"
   "$ROOT/memory/INDEX.md"
@@ -58,20 +97,24 @@ TARGETS=(
   "$ROOT/memory/events"
   "$ROOT/memory/trace"
 )
-# The runtime-managed bank/ is excluded by default (see header); opt in
-# explicitly with --include-bank.
-if [ "$INCLUDE_BANK" = "1" ]; then
-  TARGETS+=("$ROOT/memory/bank")
-fi
-# daily logs, if any
-for f in "$ROOT"/memory/20*.md; do [ -e "$f" ] && TARGETS+=("$f"); done
+# daily logs: the diary tier (capped at one match line per file)
+LOGS=()
+for f in "$ROOT"/memory/20*.md; do [ -e "$f" ] && LOGS+=("$f"); done
 # central profile lives outside the memory root; include it when set
+PROFILE=()
 [ -n "${PERSONAL_MEMORY_PROFILE:-}" ] && [ -e "$PERSONAL_MEMORY_PROFILE" ] \
-  && TARGETS+=("$PERSONAL_MEMORY_PROFILE")
-# Sort before the cap so the truncated set is deterministic run-to-run.
-# (rg's parallel traversal order is nondeterministic; an unsorted head -80
-# could drop different lines on identical input — root cause of the
-# 2026-09-20 "Taekwon Kids" flaky miss, diagnosed 2026-09-23.)
+  && PROFILE+=("$PERSONAL_MEMORY_PROFILE")
+# The runtime-managed bank/ is excluded by default (see header); opt in
+# explicitly with --include-bank. It ranks last: a mirror, never a home.
+BANK=()
+if [ "$INCLUDE_BANK" = "1" ]; then
+  BANK+=("$ROOT/memory/bank")
+fi
+
 MAX_LINES="${MEMORY_GREP_MAX_LINES:-80}"
-"${SEARCH[@]}" "$PATTERN" "${TARGETS[@]}" 2>/dev/null \
-  | LC_ALL=C sort | head -"$MAX_LINES"
+{
+  run_group 0 "${CURATED[@]}"
+  run_group 0 "${PROFILE[@]}"
+  run_group 1 "${LOGS[@]}"
+  run_group 0 "${BANK[@]}"
+} | head -"$MAX_LINES"

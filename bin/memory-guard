@@ -123,7 +123,11 @@ if [ -s "$ALLOWLIST" ]; then
   allow_tmp="$(mktemp)"
   grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" > "$allow_tmp"
   if [ -s "$allow_tmp" ] && [ -n "$figures" ]; then
-    figures="$(printf '%s\n' "$figures" | grep -vF -f "$allow_tmp" || true)"
+    # Whole-word match (-w): a bare substring match lets a short allowlisted
+    # literal mask a longer figure sharing its prefix ($45 exempting $455 —
+    # found 2026-11-07, when the $455 Galaxy invoices were silently dropped
+    # from the review report). The block tier above never uses the allowlist.
+    figures="$(printf '%s\n' "$figures" | grep -vwF -f "$allow_tmp" || true)"
   fi
   rm -f "$allow_tmp"
 fi
@@ -169,7 +173,10 @@ if [ -s "$ALLOWLIST" ]; then
   allow_tmp2="$(mktemp)"
   grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" > "$allow_tmp2"
   if [ -s "$allow_tmp2" ] && [ -n "$pii" ]; then
-    pii="$(printf '%s\n' "$pii" | grep -vF -f "$allow_tmp2" || true)"
+    # Whole-word match (-w) for the same prefix-masking reason as the figure
+    # tier above: a short allowlisted literal must not exempt a longer
+    # value sharing its prefix.
+    pii="$(printf '%s\n' "$pii" | grep -vwF -f "$allow_tmp2" || true)"
   fi
   rm -f "$allow_tmp2"
 fi

@@ -118,6 +118,33 @@ Semantic spot-checks use a fixed rubric with recorded verdicts.
 
 ## History
 
+- 2026-11-07 (night): sixth iteration — allowlist prefix masking in
+  `memory-guard`. The nightly §11c promotion of the Galaxy camp invoices
+  (INV-3476/INV-3477, $455 each) exposed it: the `.figure-allowlist` entry
+  `$45` (MVLAS DALL fall-clinic fee, reviewed 2026-09-13) was matched with
+  `grep -vF` (fixed-string substring), so it silently exempted every line
+  containing `$455` — two of the four new invoice lines never reached the
+  review report. Same class of gap for every short allowlisted literal
+  sharing a prefix with a longer figure (`$150` vs `$1500`, `$75` vs
+  `$750`). Fix: allowlist filtering in `memory-guard` (figure tier and PII
+  tier) now matches whole-word (`grep -vwF`); the block tier never uses
+  the allowlist, and the finance-index path exclusion is untouched
+  (a prefix match by design). Verified empirically first (`$45` still
+  exempts `$45`, no longer exempts `$455`; a full-line allowlist entry
+  still exempts its line). New regression tests in `leakage-audit`
+  (fixtures `figure-prefix.txt`, `figure-45.txt`; both in the fixture
+  integrity list): `$455` still flagged rc=2 under a `$45` allowlist,
+  `$45` still exempted rc=0. Validation: bash -n clean on all three
+  changed scripts; leakage-audit CLEAN 101/101 (5 skipped, was 97);
+  adversarial-run 39/39; memory-audit re-run shows the same two known
+  flags (check-1 figure set, check-4 will-executor thread) and all four
+  invoice lines now appear in a direct guard run on soccer.md. Note for
+  future audits: the "40 lines" figure count in past trace entries is the
+  guard's head-20-per-tier display cap, not the full set (uncapped count
+  tonight: 407 lines including daily logs) — the cap hides which lines are
+  reported, so display-count stability is not evidence the set is
+  unchanged.
+
 - 2026-10-13 (night): fifth iteration — memory-audit check 4 precision,
   second pass. The 2026-10-11 patch skipped closed/superseded/[x] entries,
   but the input filter still matched ANY trace line containing the word

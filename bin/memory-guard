@@ -18,6 +18,9 @@
 #     and personal-data reports, so the audit only flags genuinely new
 #     items. The human auditor curates this file: an entry lands here only
 #     after they have reviewed and approved it. Never auto-populate it.
+#     An entry exempts a line only as a complete figure token (see
+#     _allowlist_filter): a longer figure sharing the entry's prefix, or
+#     continuing it with a decimal/comma, is still flagged.
 #   MEMORY_PUBLIC_PATTERNS
 #     installation-specific public literal CLASSES the auditor ruled public
 #     (e.g. market-price quotes whose values change daily, so fixed strings
@@ -97,6 +100,54 @@ FIGURE_RE='\B\$([0-9]{1,3}(,[0-9]{3})+|[0-9]{2,}|[0-9]*\.[0-9]+|[0-9]+[kKmM])\b'
 # line); the human auditor makes the call.
 PII_RE='\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b|\b[0-9]{9}\b|\b(\+?1[-. ]?)?\(?[0-9]{3}\)?[-. ][0-9]{3}[-. ][0-9]{4}\b|\b3[47][0-9]{2}[- ]?[0-9]{6}[- ]?[0-9]{5}\b|\b[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}\b'
 
+# Allowlist exemption filter (stdin -> stdout: the lines NOT exempted).
+# An allowlist entry exempts a line only when it occurs as a complete
+# figure token: whole-word (the 2026-11-07 fix — a bare substring match
+# lets "$45" mask "$455") AND not continued as a longer figure. "." and
+# "," are word boundaries, so whole-word alone still lets "$338" mask
+# "$338.50" and "$1,231" mask "$1,231,000" (found 2026-11-25, when the
+# $5,562 Taekwon Kids membership line was silently dropped from the
+# review report because it contains "$338.50"). A literal followed by
+# "." or "," plus a digit is a different figure, so the line stays
+# flagged. A line is exempt only if some occurrence is clean AND no
+# occurrence of the same entry continues into a longer figure.
+# The block tier never uses the allowlist.
+_allowlist_filter() { # $1: allowlist file (comments/blank lines skipped)
+  awk -v allowfile="$1" '
+    BEGIN {
+      n = 0
+      while ((getline l < allowfile) > 0) {
+        if (l ~ /^[[:space:]]*(#|$)/) continue
+        allow[++n] = l
+      }
+    }
+    function wordch(c) { return (c ~ /[0-9A-Za-z_]/) }
+    {
+      exempt = 0
+      for (i = 1; i <= n && !exempt; i++) {
+        lit = allow[i]; L = length(lit)
+        clean = 0; cont = 0
+        start = 1
+        while ((p = index(substr($0, start), lit)) > 0) {
+          pos = start + p - 1
+          before = (pos == 1) ? "" : substr($0, pos - 1, 1)
+          after = substr($0, pos + L, 1)
+          after2 = substr($0, pos + L + 1, 1)
+          first = substr(lit, 1, 1); last = substr(lit, L, 1)
+          lead_ok = (first !~ /[0-9A-Za-z_]/) || before == "" || !wordch(before)
+          trail_ok = (last !~ /[0-9A-Za-z_]/) || after == "" || !wordch(after)
+          if (lead_ok && trail_ok) {
+            if ((after == "." || after == ",") && after2 ~ /[0-9]/) cont = 1
+            else clean = 1
+          }
+          start = pos + 1
+        }
+        if (clean && !cont) exempt = 1
+      }
+      if (!exempt) print
+    }'
+}
+
 status=0
 echo "--- secrets:"
 secrets=$(grep -rniE -- "$SECRET_RE" "${TARGETS[@]}" 2>/dev/null | head -20)
@@ -123,11 +174,14 @@ if [ -s "$ALLOWLIST" ]; then
   allow_tmp="$(mktemp)"
   grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" > "$allow_tmp"
   if [ -s "$allow_tmp" ] && [ -n "$figures" ]; then
-    # Whole-word match (-w): a bare substring match lets a short allowlisted
-    # literal mask a longer figure sharing its prefix ($45 exempting $455 —
-    # found 2026-11-07, when the $455 Galaxy invoices were silently dropped
-    # from the review report). The block tier above never uses the allowlist.
-    figures="$(printf '%s\n' "$figures" | grep -vwF -f "$allow_tmp" || true)"
+    # Whole-word + no-figure-continuation (see _allowlist_filter): a bare
+    # substring match lets a short allowlisted literal mask a longer figure
+    # sharing its prefix ($45 exempting $455 — found 2026-11-07, when the
+    # $455 Galaxy invoices were silently dropped from the review report;
+    # $338 exempting $338.50 — found 2026-11-25, when the $5,562 Taekwon
+    # Kids membership line was silently dropped). The block tier above
+    # never uses the allowlist.
+    figures="$(printf '%s\n' "$figures" | _allowlist_filter "$allow_tmp" || true)"
   fi
   rm -f "$allow_tmp"
 fi
@@ -173,10 +227,11 @@ if [ -s "$ALLOWLIST" ]; then
   allow_tmp2="$(mktemp)"
   grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" > "$allow_tmp2"
   if [ -s "$allow_tmp2" ] && [ -n "$pii" ]; then
-    # Whole-word match (-w) for the same prefix-masking reason as the figure
-    # tier above: a short allowlisted literal must not exempt a longer
-    # value sharing its prefix.
-    pii="$(printf '%s\n' "$pii" | grep -vwF -f "$allow_tmp2" || true)"
+    # Whole-word + no-figure-continuation, same rule as the figure tier
+    # above (see _allowlist_filter): a short allowlisted literal must not
+    # exempt a longer value sharing its prefix or continuing it with a
+    # decimal/comma.
+    pii="$(printf '%s\n' "$pii" | _allowlist_filter "$allow_tmp2" || true)"
   fi
   rm -f "$allow_tmp2"
 fi

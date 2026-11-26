@@ -11,11 +11,27 @@
 #
 # v2 RANKING FUNCTION — part of the system under test. Do not change silently:
 #   From memory-grep output, parse `file:line:` hit lines. Group hits by file.
-#   Rank files by (hit_count DESC, first_hit_line ASC); remaining full ties
-#   are broken by file path ASC so the ordering is fully deterministic.
-#   Every "rank 1-3" reference in the metrics below uses this ordering. If this
-#   function ever changes, historical trajectory scores are not comparable:
-#   bump the suite version and record the change in the query changelog.
+#   Rank files by these keys, in order:
+#     1. name/title match DESC — every query token appears in the file's
+#        name tokens or its title (first heading / first line) tokens, or
+#        every name token appears in the query. A page named or titled for
+#        the query is its canonical home and outranks mere mentioners.
+#     2. hit_count DESC — substantive coverage beats a passing mention.
+#     3. tier ASC — curated pages, then the central profile, then daily
+#        logs, then bank/ (Joon's 2026-10-18 rule, applied as the tiebreak
+#        among equal-coverage files; memory-grep already caps each daily
+#        log at one match line, so logs cannot win on volume).
+#     4. first_hit_line ASC, then file path ASC (fully deterministic).
+#   Every "rank 1-3" reference in the metrics below uses this ordering.
+#   History: v2.0/v2.1 ranked by (hit_count DESC, first_hit_line ASC,
+#   path ASC) only. That measured mention volume, not aboutness: by
+#   2026-11-22 the trajectory had declined 3 consecutive weeks (MRR
+#   0.642 -> 0.599) as accumulating pages that merely mention an entity
+#   outranked its canonical home (e.g. locations/372-virginia-ave.md,
+#   whose title IS the query, ranked 13th). Changed 2026-11-25 at Joon's
+#   direction ("Improve it"); suite bumped to v2.2 in the query file and
+#   the change recorded in the query changelog. Scores before and after
+#   the bump are not directly comparable.
 #
 # Usage v1: memory-retrieval-test <query-file> [memory-root]
 #   query-file: one test per line:  <query> ||| <expected-substring>
@@ -93,7 +109,7 @@ run_v2() {
   local pdate
   pdate="$(TZ=America/Los_Angeles date +%F)"
   python3 - "$qf" "$split" "$traj" "$SKILL_DIR" "$pdate" <<'PYEOF'
-import json, math, os, subprocess, sys, time
+import json, math, os, re, subprocess, sys, time
 
 def die(msg):
     sys.stderr.write("memory-retrieval-test v2: harness error: %s\n" % msg)
@@ -156,16 +172,70 @@ def parse_hits(text):
         hits.append((head, int(num)))
     return hits
 
-def rank_files(hits):
-    """RANKING FUNCTION (see script header): group hits by file, order by
-    (hit_count DESC, first_hit_line ASC, file path ASC)."""
+_title_cache = {}
+
+def file_title(path):
+    """A file's title: its first heading line, or its first non-empty
+    line, lowercased. Empty string when unreadable."""
+    if path in _title_cache:
+        return _title_cache[path]
+    title = ""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                s = line.strip()
+                if s.startswith("#"):
+                    title = s.lstrip("# ").lower()
+                    break
+                if s:
+                    title = s.lower()
+                    break
+    except OSError:
+        title = ""
+    _title_cache[path] = title
+    return title
+
+def _tokens(text):
+    return set(re.findall(r"[a-z0-9]+", text.lower())) - {"md"}
+
+def name_or_title_match(path, query_tokens):
+    """True when every query token appears in the file's name tokens or
+    its title tokens, or every name token appears in the query."""
+    if not query_tokens:
+        return False
+    name_tokens = _tokens(os.path.basename(path))
+    if query_tokens <= name_tokens or (name_tokens
+                                       and name_tokens <= query_tokens):
+        return True
+    return query_tokens <= _tokens(file_title(path))
+
+_LOG_PATH = re.compile(r"/memory/20\d\d-\d\d-\d\d\.md$")
+
+def file_tier(path):
+    """0 curated, 1 central profile, 2 daily log, 3 bank/."""
+    profile = os.environ.get("PERSONAL_MEMORY_PROFILE", "")
+    if profile and os.path.abspath(path) == os.path.abspath(profile):
+        return 1
+    if "/memory/bank/" in path:
+        return 3
+    if _LOG_PATH.search(path):
+        return 2
+    return 0
+
+def rank_files(hits, query):
+    """RANKING FUNCTION v2.2 (see script header): group hits by file,
+    order by (name/title match DESC, hit_count DESC, tier ASC,
+    first_hit_line ASC, file path ASC)."""
     counts = {}
     first = {}
     for path, ln in hits:
         counts[path] = counts.get(path, 0) + 1
         if path not in first or ln < first[path]:
             first[path] = ln
-    return sorted(counts, key=lambda p: (-counts[p], first[p], p))
+    query_tokens = _tokens(query)
+    return sorted(counts, key=lambda p: (
+        0 if name_or_title_match(p, query_tokens) else 1,
+        -counts[p], file_tier(p), first[p], p))
 
 def run_grep(greppath, query, env):
     t0 = time.perf_counter_ns()
@@ -226,7 +296,7 @@ def main():
     print("")
     for rec in recs:
         out, ms = run_grep(greppath, rec["query"], env)
-        ranked = rank_files(parse_hits(out))
+        ranked = rank_files(parse_hits(out), rec["query"])
         s = score_query(rec, ranked)
         s["ms"] = ms
         results.append(s)

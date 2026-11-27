@@ -416,9 +416,9 @@ class ContextGraph:
             ).fetchall()
         )
 
-        # 2. FTS5 search fallback / expansion
+        # 2. FTS5 search fallback / expansion (quote every token so FTS5 keywords like NOT/OR/NEAR never crash)
         if not anchors:
-            fts_terms = " OR ".join(re.findall(r"[A-Za-z0-9]+", q_clean))
+            fts_terms = " OR ".join(f'"{t}"' for t in re.findall(r"[A-Za-z0-9]+", q_clean))
             if fts_terms:
                 anchors.extend(
                     self.conn.execute(

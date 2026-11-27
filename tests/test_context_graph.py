@@ -65,6 +65,10 @@ class TestContextGraph(unittest.TestCase):
                 g.ingest_memory_tree(root)
                 self.assertEqual(g.stats()["nodes"], before)
 
+                # FTS5 reserved keywords (NOT / OR / NEAR) must never crash query_context
+                safe_res = g.query_context("not or near soccer")
+                self.assertGreaterEqual(safe_res["total_connected"], 1)
+
     def test_refuses_secret_or_private_balance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with ContextGraph(Path(tmp) / "g.db") as g:

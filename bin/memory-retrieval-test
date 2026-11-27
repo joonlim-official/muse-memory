@@ -12,10 +12,13 @@
 # v2 RANKING FUNCTION — part of the system under test. Do not change silently:
 #   From memory-grep output, parse `file:line:` hit lines. Group hits by file.
 #   Rank files by these keys, in order:
-#     1. name/title match DESC — every query token appears in the file's
-#        name tokens or its title (first heading / first line) tokens, or
-#        every name token appears in the query. A page named or titled for
-#        the query is its canonical home and outranks mere mentioners.
+#     1. match class ASC — 0: the query matches the file's NAME tokens
+#        (every query token in the name, or every name token in the
+#        query): the page is filed under the query's name. 1: it matches
+#        only the declared identity tokens (front-matter title / H1 /
+#        Covers: line). 2: no match. A page named for the query is its
+#        canonical home and outranks pages merely titled for it, which
+#        outrank mere mentioners.
 #     2. hit_count DESC — substantive coverage beats a passing mention.
 #     3. tier ASC — curated pages, then the central profile, then daily
 #        logs, then bank/ (Joon's 2026-10-18 rule, applied as the tiebreak
@@ -32,6 +35,20 @@
 #   direction ("Improve it"); suite bumped to v2.2 in the query file and
 #   the change recorded in the query changelog. Scores before and after
 #   the bump are not directly comparable.
+#   v2.3 (2026-11-26, Joon's direction: improve indexing quality so
+#   other agents find the right page): the keys are unchanged; what a
+#   "title" is got fixed and widened. (a) All 131 curated pages open
+#   with YAML front matter, so v2.2's first-line title read "---" for
+#   every one of them and the title signal was dead; the title is now
+#   read from the front matter (title/display_name/name), else the
+#   first H1. (b) A page may declare its coverage on a "Covers:" line
+#   under its H1 (the names and entities the page is the home for, as
+#   they are actually called); those tokens join the title tokens in
+#   key 1. A 25-query cold-agent probe set (org/club/program names as
+#   an agent would search them) scored HIT@3 0.480 / MRR 0.442 under
+#   v2.2 — acronym and alternate-name searches (MVLA, Cal North ODP,
+#   NorCal, Labels and Annotations) did not route to their homes.
+#   Suite bumped to v2.3; recorded in the query changelog.
 #
 # Usage v1: memory-retrieval-test <query-file> [memory-root]
 #   query-file: one test per line:  <query> ||| <expected-substring>
@@ -175,39 +192,73 @@ def parse_hits(text):
 _title_cache = {}
 
 def file_title(path):
-    """A file's title: its first heading line, or its first non-empty
-    line, lowercased. Empty string when unreadable."""
+    """A file's declared identity text, lowercased: the front-matter
+    title/display_name/name when the file opens with YAML front matter,
+    else its first H1, else its first non-empty line. Plus, appended,
+    the text of a "Covers:" scope line in the first 20 lines when one
+    exists (v2.3: the page's declared coverage — see header). Empty
+    string when unreadable."""
     if path in _title_cache:
         return _title_cache[path]
     title = ""
+    covers = ""
     try:
+        lines = []
         with open(path, encoding="utf-8", errors="ignore") as fh:
-            for line in fh:
-                s = line.strip()
-                if s.startswith("#"):
-                    title = s.lstrip("# ").lower()
+            for i, line in enumerate(fh):
+                if i >= 40:
                     break
-                if s:
-                    title = s.lower()
+                lines.append(line.rstrip("\n"))
+        body = lines
+        if lines and lines[0].strip() == "---":
+            for i, l in enumerate(lines[1:], 1):
+                if l.strip() == "---":
+                    body = lines[i + 1:]
                     break
+                m = re.match(r'(?:title|display_name|name):\s*"?([^"\n]+)"?',
+                             l)
+                if m and not title:
+                    title = m.group(1).strip().lower()
+        if not title:
+            for l in body:
+                if l.startswith("# "):
+                    title = l[2:].strip().lower()
+                    break
+            if not title:
+                for l in body:
+                    if l.strip():
+                        title = l.strip().lower()
+                        break
+        for l in lines[:20]:
+            s = l.strip()
+            if s.lower().startswith("covers:"):
+                covers = s[len("covers:"):].strip().lower()
+                break
     except OSError:
-        title = ""
-    _title_cache[path] = title
-    return title
+        title, covers = "", ""
+    _title_cache[path] = (title + " " + covers).strip()
+    return _title_cache[path]
 
 def _tokens(text):
     return set(re.findall(r"[a-z0-9]+", text.lower())) - {"md"}
 
 def name_or_title_match(path, query_tokens):
-    """True when every query token appears in the file's name tokens or
-    its title tokens, or every name token appears in the query."""
+    """Match class for key 1: 0 when the query matches the file's NAME
+    tokens (every query token in the name, or every name token in the
+    query) — the page is filed under the query's name; 1 when it matches
+    only the declared identity tokens (front-matter title / H1 /
+    Covers: line) — the page declares the topic but is filed under
+    another name (e.g. a dated activity record titled for the place);
+    2 when neither matches."""
     if not query_tokens:
-        return False
+        return 2
     name_tokens = _tokens(os.path.basename(path))
     if query_tokens <= name_tokens or (name_tokens
                                        and name_tokens <= query_tokens):
-        return True
-    return query_tokens <= _tokens(file_title(path))
+        return 0
+    if query_tokens <= _tokens(file_title(path)):
+        return 1
+    return 2
 
 _LOG_PATH = re.compile(r"/memory/20\d\d-\d\d-\d\d\.md$")
 
@@ -223,8 +274,8 @@ def file_tier(path):
     return 0
 
 def rank_files(hits, query):
-    """RANKING FUNCTION v2.2 (see script header): group hits by file,
-    order by (name/title match DESC, hit_count DESC, tier ASC,
+    """RANKING FUNCTION v2.3 (see script header): group hits by file,
+    order by (match class ASC [name, then declared identity], hit_count DESC, tier ASC,
     first_hit_line ASC, file path ASC)."""
     counts = {}
     first = {}
@@ -234,7 +285,7 @@ def rank_files(hits, query):
             first[path] = ln
     query_tokens = _tokens(query)
     return sorted(counts, key=lambda p: (
-        0 if name_or_title_match(p, query_tokens) else 1,
+        name_or_title_match(p, query_tokens),
         -counts[p], file_tier(p), first[p], p))
 
 def run_grep(greppath, query, env):

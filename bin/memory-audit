@@ -410,6 +410,42 @@ else
 fi
 say ""
 
+# 12. index completeness + page-head integrity (added 2026-11-26) --------------
+# Check 9a verifies INDEX refs resolve; this is the reverse direction and
+# the head convention from ~/memory/INDEX.md ("Page heads"): every curated
+# page is reachable from its area INDEX, and every curated page identifies
+# itself (front-matter title/display_name/name or an H1). Without this,
+# orphaned or headless pages are invisible to agents navigating by index.
+say "## 12. index completeness (orphan pages + page heads)"
+orphan_tmp="$(mktemp)"
+for area in people groups topics locations meetings; do
+  idx="$MEM/$area/INDEX.md"
+  [ -f "$idx" ] || continue
+  [ -d "$MEM/$area" ] || continue
+  for f in "$MEM/$area/"*.md; do
+    [ -e "$f" ] || continue
+    bn="$(basename "$f")"
+    [ "$bn" = "INDEX.md" ] && continue
+    case "$bn" in *_INDEX.md) continue ;; esac
+    grep -q "$bn" "$idx" || printf 'orphan|%s|%s\n' "$area" "$bn" >> "$orphan_tmp"
+    head -15 "$f" | grep -qE '^(title|display_name|name):' \
+      || grep -q '^# ' "$f" \
+      || printf 'headless|%s|%s\n' "$area" "$bn" >> "$orphan_tmp"
+  done
+done
+if [ -s "$orphan_tmp" ]; then
+  while IFS='|' read -r kind area detail; do
+    case "$kind" in
+      orphan)   flag "orphan page: $area/$detail is not referenced by $area/INDEX.md" ;;
+      headless) flag "page head: $area/$detail has no front-matter title/display_name/name and no H1" ;;
+    esac
+  done < "$orphan_tmp"
+else
+  say "  ok — every curated page is indexed and carries a title or H1."
+fi
+rm -f "$orphan_tmp"
+say ""
+
 if [ "$ISSUES" -eq 0 ]; then
   echo "AUDIT RESULT: clean"
   exit 0

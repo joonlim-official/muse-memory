@@ -49,10 +49,15 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.add_argument("--file", type=Path)
     p_ev.add_argument("--stdin", action="store_true")
 
+    p_emb = sub.add_parser("embed", help="Incrementally embed graph nodes (auto: Gemini API if GEMINI_API_KEY set, else local ngram).")
+    p_emb.add_argument("--backend", choices=["auto", "gemini", "local"], default="auto")
+
     p_ctx = sub.add_parser("context", help="Assemble holistic topic context across all connected sources.")
     p_ctx.add_argument("query")
     p_ctx.add_argument("--hops", type=int, default=2)
     p_ctx.add_argument("--limit", type=int, default=30)
+    p_ctx.add_argument("--no-semantic", action="store_true", help="Disable semantic embedding fallback.")
+    p_ctx.add_argument("--min-sim", type=float, default=0.25, help="Minimum cosine similarity for semantic fallback.")
     p_ctx.add_argument("--json", action="store_true")
 
     p_st = sub.add_parser("stats", help="Print graph node/edge counts.")
@@ -100,8 +105,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"INGEST_EVENT_OK: count={ingested}")
             return 0
 
+        if args.cmd == "embed":
+            try:
+                res = g.embed_all_nodes(backend=args.backend)
+            except RuntimeError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 1
+            print(f"EMBED_OK: backend={res['backend']} embedded={res['embedded']} skipped={res['skipped']}")
+            return 0
+
         if args.cmd == "context":
-            ctx = g.query_context(args.query, hops=args.hops, limit=args.limit)
+            ctx = g.query_context(
+                args.query,
+                hops=args.hops,
+                limit=args.limit,
+                semantic_fallback=not args.no_semantic,
+                min_sim=args.min_sim,
+            )
             if args.json:
                 print(json.dumps(ctx, indent=2))
             else:

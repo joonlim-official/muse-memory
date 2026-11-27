@@ -21,6 +21,15 @@ import re
 import sqlite3
 from pathlib import Path
 
+from .embeddings import (
+    choose_backend,
+    content_hash as embed_content_hash,
+    cosine_similarity,
+    embed_text,
+    pack_vector,
+    unpack_vector,
+)
+
 DEFAULT_DB_NAME = "context_graph.db"
 
 NODE_TYPES = {
@@ -158,6 +167,16 @@ class ContextGraph:
                 nodes_upserted INTEGER NOT NULL,
                 edges_upserted INTEGER NOT NULL,
                 ran_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS node_embeddings (
+                node_id TEXT PRIMARY KEY,
+                content_hash TEXT NOT NULL,
+                model TEXT NOT NULL,
+                dims INTEGER NOT NULL,
+                vector_blob BLOB NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
             );
             """
         )
@@ -402,35 +421,117 @@ class ContextGraph:
         self.record_ingest(source, 1, edges_n)
         return {"node_id": raw_id, "edges": edges_n}
 
-    def query_context(self, query: str, hops: int = 2, limit: int = 40) -> dict[str, object]:
-        """Assemble holistic topic context across all connected signal sources."""
+    def embed_all_nodes(self, backend: str = "auto") -> dict[str, object]:
+        """Incrementally embed all nodes whose content hash changed (never re-embeds unchanged nodes)."""
+        chosen = choose_backend(backend)
+        rows = self.conn.execute("SELECT id, title, aliases, summary FROM nodes").fetchall()
+        existing = {
+            str(r["node_id"]): (str(r["content_hash"]), str(r["model"]))
+            for r in self.conn.execute("SELECT node_id, content_hash, model FROM node_embeddings").fetchall()
+        }
+        embedded = 0
+        skipped = 0
+        model_label = ""
+        for r in rows:
+            nid = str(r["id"])
+            text = f"{r['title']} {r['aliases']} {r['summary']}".strip()
+            if not text:
+                skipped += 1
+                continue
+            chash = embed_content_hash(text)
+            prev = existing.get(nid)
+            if prev and prev[0] == chash and prev[1].startswith(f"{chosen}:"):
+                skipped += 1
+                continue
+            vec, model_label = embed_text(text, backend=chosen)
+            self.conn.execute(
+                """
+                INSERT INTO node_embeddings (node_id, content_hash, model, dims, vector_blob, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(node_id) DO UPDATE SET
+                    content_hash=excluded.content_hash,
+                    model=excluded.model,
+                    dims=excluded.dims,
+                    vector_blob=excluded.vector_blob,
+                    updated_at=excluded.updated_at
+                """,
+                (nid, chash, model_label, len(vec), pack_vector(vec), _now_iso()),
+            )
+            embedded += 1
+        self.conn.commit()
+        return {"backend": chosen, "model": model_label, "embedded": embedded, "skipped": skipped}
+
+    def _semantic_anchors(self, query: str, backend: str = "auto", top_k: int = 3, min_sim: float = 0.25) -> list[tuple[sqlite3.Row, float]]:
+        stored = self.conn.execute("SELECT node_id, model, vector_blob FROM node_embeddings").fetchall()
+        if not stored:
+            return []
+        # Match query embedding backend to stored vectors' prefix
+        first_model = str(stored[0]["model"])
+        vec_backend = "gemini" if first_model.startswith("gemini:") else "local"
+        if backend in ("gemini", "local") and backend != vec_backend:
+            vec_backend = backend
+        try:
+            q_vec, q_model = embed_text(query, backend=vec_backend)
+        except RuntimeError:
+            return []
+        scored: list[tuple[float, str]] = []
+        for r in stored:
+            if str(r["model"]) != q_model:
+                continue
+            sim = cosine_similarity(q_vec, unpack_vector(bytes(r["vector_blob"])))
+            if sim >= min_sim:
+                scored.append((sim, str(r["node_id"])))
+        scored.sort(reverse=True)
+        out: list[tuple[sqlite3.Row, float]] = []
+        for sim, nid in scored[:top_k]:
+            row = self.conn.execute("SELECT * FROM nodes WHERE id = ?", (nid,)).fetchone()
+            if row:
+                out.append((row, round(sim, 4)))
+        return out
+
+    def query_context(
+        self,
+        query: str,
+        hops: int = 2,
+        limit: int = 40,
+        semantic_fallback: bool = True,
+        min_sim: float = 0.25,
+    ) -> dict[str, object]:
+        """Assemble holistic topic context across all connected signal sources (lexical first, semantic fallback)."""
         q_clean = query.strip()
         anchors: list[sqlite3.Row] = []
+        anchor_meta: dict[str, dict[str, object]] = {}
 
         # 1. Exact ID or slug match first
         exact_slug = _slug(q_clean)
-        anchors.extend(
-            self.conn.execute(
-                "SELECT * FROM nodes WHERE id = ? OR id LIKE ? OR lower(title) = lower(?) LIMIT 5",
-                (q_clean, f"%:{exact_slug}", q_clean),
-            ).fetchall()
-        )
+        for r in self.conn.execute(
+            "SELECT * FROM nodes WHERE id = ? OR id LIKE ? OR lower(title) = lower(?) LIMIT 5",
+            (q_clean, f"%:{exact_slug}", q_clean),
+        ).fetchall():
+            anchors.append(r)
+            anchor_meta[str(r["id"])] = {"matched_by": "exact"}
 
         # 2. FTS5 search fallback / expansion (quote every token so FTS5 keywords like NOT/OR/NEAR never crash)
         if not anchors:
             fts_terms = " OR ".join(f'"{t}"' for t in re.findall(r"[A-Za-z0-9]+", q_clean))
             if fts_terms:
-                anchors.extend(
-                    self.conn.execute(
-                        """
-                        SELECT n.* FROM nodes_fts f
-                        JOIN nodes n ON n.id = f.id
-                        WHERE nodes_fts MATCH ?
-                        ORDER BY rank LIMIT 5
-                        """,
-                        (fts_terms,),
-                    ).fetchall()
-                )
+                for r in self.conn.execute(
+                    """
+                    SELECT n.* FROM nodes_fts f
+                    JOIN nodes n ON n.id = f.id
+                    WHERE nodes_fts MATCH ?
+                    ORDER BY rank LIMIT 5
+                    """,
+                    (fts_terms,),
+                ).fetchall():
+                    anchors.append(r)
+                    anchor_meta[str(r["id"])] = {"matched_by": "fts5"}
+
+        # 3. Semantic embedding fallback when lexical returns 0 anchors
+        if not anchors and semantic_fallback:
+            for r, sim in self._semantic_anchors(q_clean, min_sim=min_sim):
+                anchors.append(r)
+                anchor_meta[str(r["id"])] = {"matched_by": "semantic", "similarity": sim}
 
         if not anchors:
             return {"query": q_clean, "anchors": [], "by_type": {}, "total_connected": 0}
@@ -478,7 +579,15 @@ class ContextGraph:
 
         return {
             "query": q_clean,
-            "anchors": [{"id": str(r["id"]), "node_type": str(r["node_type"]), "title": str(r["title"])} for r in anchors],
+            "anchors": [
+                {
+                    "id": str(r["id"]),
+                    "node_type": str(r["node_type"]),
+                    "title": str(r["title"]),
+                    **anchor_meta.get(str(r["id"]), {}),
+                }
+                for r in anchors
+            ],
             "by_type": by_type,
             "total_connected": len(visited),
         }

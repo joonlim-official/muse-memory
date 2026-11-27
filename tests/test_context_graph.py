@@ -79,6 +79,29 @@ class TestContextGraph(unittest.TestCase):
                         "summary": "My checking balance is $125,000.00",  # leakage-check:ignore-line
                     })
 
+    def test_semantic_embedding_fallback_and_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with ContextGraph(Path(tmp) / "g.db") as g:
+                g.upsert_node(
+                    "topic:soccer",
+                    "topic",
+                    "Youth Soccer",
+                    summary="Footwork drills, turf cleats, scrimmages, and weekend tournaments.",
+                )
+                first = g.embed_all_nodes(backend="local")
+                self.assertEqual(first["embedded"], 1)
+                self.assertEqual(first["skipped"], 0)
+                # Second call skips unchanged node (content-hash cache)
+                second = g.embed_all_nodes(backend="local")
+                self.assertEqual(second["embedded"], 0)
+                self.assertEqual(second["skipped"], 1)
+
+                # Fuzzy/morphological query ("tournamentship" misses exact FTS5, hits char-trigram semantic fallback)
+                ctx = g.query_context("tournamentship", semantic_fallback=True, min_sim=0.15)
+                self.assertEqual(len(ctx["anchors"]), 1)
+                self.assertEqual(ctx["anchors"][0]["id"], "topic:soccer")
+                self.assertEqual(ctx["anchors"][0]["matched_by"], "semantic")
+
 
 if __name__ == "__main__":
     unittest.main()

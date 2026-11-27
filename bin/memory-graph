@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""memory-graph: Holistic Personal Context Graph DB CLI for muse-memory.
+
+Connects geo/Maps Timeline, curated agent memory, Plaud voice notes, Gmail,
+WhatsApp chat, Shop/purchase orders, photo events, and calendar events into
+one SQLite3 + FTS5 graph for zero-token holistic topic assembly.
+
+Usage:
+  memory-graph init [--db PATH]
+  memory-graph ingest-memory [MEMORY_ROOT] [--db PATH]
+  memory-graph ingest-timeline <timeline.json> [--db PATH]
+  memory-graph ingest-event [--file event.json | --stdin] [--db PATH]
+  memory-graph context "<topic|person|place|date>" [--hops 2] [--json] [--db PATH]
+  memory-graph stats [--json] [--db PATH]
+"""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+SKILL_DIR = Path(__file__).resolve().parent.parent
+if str(SKILL_DIR / "lib") not in sys.path:
+    sys.path.insert(0, str(SKILL_DIR / "lib"))
+
+from context_graph import ContextGraph, DEFAULT_DB_NAME  # noqa: E402
+
+
+def default_db() -> Path:
+    root = Path(os.environ.get("PERSONAL_MEMORY_ROOT", str(Path.home())))
+    return root / "memory" / DEFAULT_DB_NAME
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Holistic Personal Context Graph DB CLI.")
+    parser.add_argument("--db", type=Path, default=default_db(), help="SQLite DB path.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("init", help="Initialize the SQLite context graph database.")
+
+    p_mem = sub.add_parser("ingest-memory", help="Ingest curated ~/memory pages and cross-links.")
+    p_mem.add_argument("memory_root", nargs="?", type=Path, default=Path(os.environ.get("PERSONAL_MEMORY_ROOT", str(Path.home()))))
+
+    p_tl = sub.add_parser("ingest-timeline", help="Ingest Google Maps Timeline index JSON.")
+    p_tl.add_argument("timeline_json", type=Path)
+
+    p_ev = sub.add_parser("ingest-event", help="Ingest one or more signal events (voice_note, email, chat, purchase, photo_event, event).")
+    p_ev.add_argument("--file", type=Path)
+    p_ev.add_argument("--stdin", action="store_true")
+
+    p_ctx = sub.add_parser("context", help="Assemble holistic topic context across all connected sources.")
+    p_ctx.add_argument("query")
+    p_ctx.add_argument("--hops", type=int, default=2)
+    p_ctx.add_argument("--limit", type=int, default=30)
+    p_ctx.add_argument("--json", action="store_true")
+
+    p_st = sub.add_parser("stats", help="Print graph node/edge counts.")
+    p_st.add_argument("--json", action="store_true")
+
+    args = parser.parse_args(argv)
+
+    with ContextGraph(args.db) as g:
+        if args.cmd == "init":
+            print(f"GRAPH_INIT_OK: {args.db}")
+            return 0
+
+        if args.cmd == "ingest-memory":
+            if not args.memory_root.is_dir():
+                print(f"ERROR: memory root not found: {args.memory_root}", file=sys.stderr)
+                return 2
+            res = g.ingest_memory_tree(args.memory_root)
+            print(f"INGEST_MEMORY_OK: nodes={res['nodes']} edges={res['edges']}")
+            return 0
+
+        if args.cmd == "ingest-timeline":
+            if not args.timeline_json.is_file():
+                print(f"ERROR: timeline json not found: {args.timeline_json}", file=sys.stderr)
+                return 2
+            data = json.loads(args.timeline_json.read_text(encoding="utf-8"))
+            res = g.ingest_timeline(data)
+            print(f"INGEST_TIMELINE_OK: nodes={res['nodes']} edges={res['edges']}")
+            return 0
+
+        if args.cmd == "ingest-event":
+            raw = sys.stdin.read() if args.stdin else (args.file.read_text(encoding="utf-8") if args.file else "")
+            if not raw.strip():
+                print("ERROR: provide --file <json> or --stdin", file=sys.stderr)
+                return 2
+            loaded = json.loads(raw)
+            events = loaded if isinstance(loaded, list) else [loaded]
+            ingested = 0
+            for ev in events:
+                try:
+                    g.ingest_event(ev)
+                    ingested += 1
+                except ValueError as exc:
+                    print(f"REFUSED: {exc}", file=sys.stderr)
+                    return 1
+            print(f"INGEST_EVENT_OK: count={ingested}")
+            return 0
+
+        if args.cmd == "context":
+            ctx = g.query_context(args.query, hops=args.hops, limit=args.limit)
+            if args.json:
+                print(json.dumps(ctx, indent=2))
+            else:
+                print(f"# Holistic Context: {ctx['query']} (connected nodes: {ctx['total_connected']})")
+                if not ctx["anchors"]:
+                    print("NO_MATCHES")
+                    return 0
+                for ntype, items in sorted(ctx["by_type"].items()):
+                    print(f"\n## {ntype} ({len(items)})")
+                    for it in items:
+                        ts = f" [{it['timestamp']}]" if it["timestamp"] else ""
+                        ref = f" ({it['ref_path']})" if it["ref_path"] else ""
+                        print(f"- {it['title']}{ts}{ref} — {it['summary'][:120]}")
+            return 0
+
+        if args.cmd == "stats":
+            st = g.stats()
+            if args.json:
+                print(json.dumps(st, indent=2))
+            else:
+                print(f"GRAPH_STATS: nodes={st['nodes']} edges={st['edges']} db={st['db_path']}")
+                for k, v in st["nodes_by_type"].items():
+                    print(f"  node[{k}]: {v}")
+                for k, v in st["edges_by_relation"].items():
+                    print(f"  edge[{k}]: {v}")
+            return 0
+
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

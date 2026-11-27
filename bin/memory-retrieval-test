@@ -35,7 +35,7 @@
 #   direction ("Improve it"); suite bumped to v2.2 in the query file and
 #   the change recorded in the query changelog. Scores before and after
 #   the bump are not directly comparable.
-#   v2.3 (2026-11-26, Joon's direction: improve indexing quality so
+#   v2.3 (2026-11-27, Joon's direction: improve indexing quality so
 #   other agents find the right page): the keys are unchanged; what a
 #   "title" is got fixed and widened. (a) All 131 curated pages open
 #   with YAML front matter, so v2.2's first-line title read "---" for

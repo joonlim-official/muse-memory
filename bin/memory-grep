@@ -95,7 +95,7 @@ CURATED=(
   "$ROOT/memory/interests"
   "$ROOT/memory/locations"
   "$ROOT/memory/events"
-  "$ROOT/memory/trace"
+  "$ROOT/memory/trace/trace.md"
 )
 # daily logs: the diary tier (capped at one match line per file)
 LOGS=()

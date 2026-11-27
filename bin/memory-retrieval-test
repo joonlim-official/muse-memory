@@ -190,17 +190,18 @@ def parse_hits(text):
     return hits
 
 _title_cache = {}
+_subhead_cache = {}
 
 def file_title(path):
     """A file's declared identity text, lowercased: the front-matter
-    title/display_name/name when the file opens with YAML front matter,
-    else its first H1, else its first non-empty line. Plus, appended,
-    the text of a "Covers:" scope line in the first 20 lines when one
-    exists (v2.3: the page's declared coverage — see header). Empty
-    string when unreadable."""
+    title/display_name/name/aliases when the file opens with YAML front
+    matter, else its first H1, else its first non-empty line. Plus,
+    appended, the text of a "Covers:" scope line in the first 20 lines
+    when one exists (v2.3/v2.4). Empty string when unreadable."""
     if path in _title_cache:
         return _title_cache[path]
     title = ""
+    aliases = ""
     covers = ""
     try:
         lines = []
@@ -219,6 +220,9 @@ def file_title(path):
                              l)
                 if m and not title:
                     title = m.group(1).strip().lower()
+                ma = re.match(r'(?:aliases|covers):\s*"?([^"\n]+)"?', l, re.I)
+                if ma:
+                    aliases += " " + ma.group(1).strip().lower()
         if not title:
             for l in body:
                 if l.startswith("# "):
@@ -235,41 +239,60 @@ def file_title(path):
                 covers = s[len("covers:"):].strip().lower()
                 break
     except OSError:
-        title, covers = "", ""
-    _title_cache[path] = (title + " " + covers).strip()
+        title, aliases, covers = "", "", ""
+    _title_cache[path] = (title + " " + aliases + " " + covers).strip()
     return _title_cache[path]
+
+def file_subheadings(path):
+    """v2.4: lowercased H2/H3 subsection headings in a file, so dedicated
+    subsections (e.g. '## Estate planning — living trust') rank above
+    body mentioners without outranking filename or declared-identity homes."""
+    if path in _subhead_cache:
+        return _subhead_cache[path]
+    heads = []
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                s = line.lstrip()
+                if s.startswith("## ") or s.startswith("### "):
+                    heads.append(s.lstrip("#").strip().lower())
+    except OSError:
+        pass
+    _subhead_cache[path] = heads
+    return heads
 
 def _tokens(text):
     return set(re.findall(r"[a-z0-9]+", text.lower())) - {"md"}
 
 def name_or_title_match(path, query_tokens):
-    """Match class for key 1: 0 when the query matches the file's NAME
-    tokens (every query token in the name, or every name token in the
-    query) — the page is filed under the query's name; 1 when it matches
-    only the declared identity tokens (front-matter title / H1 /
-    Covers: line) — the page declares the topic but is filed under
-    another name (e.g. a dated activity record titled for the place);
-    2 when neither matches."""
+    """Match class for key 1 (v2.4):
+      0 = query matches the file's NAME tokens (canonical filename home)
+      1 = query matches declared identity tokens (front-matter title/aliases/Covers or H1)
+      2 = query matches an H2/H3 subsection heading inside the file
+      3 = body mention only."""
     if not query_tokens:
-        return 2
+        return 3
     name_tokens = _tokens(os.path.basename(path))
     if query_tokens <= name_tokens or (name_tokens
                                        and name_tokens <= query_tokens):
         return 0
     if query_tokens <= _tokens(file_title(path)):
         return 1
-    return 2
+    for h in file_subheadings(path):
+        if query_tokens <= _tokens(h):
+            return 2
+    return 3
 
 _LOG_PATH = re.compile(r"/memory/20\d\d-\d\d-\d\d\.md$")
 
 def file_tier(path):
-    """0 curated, 1 central profile, 2 daily log, 3 bank/."""
+    """0 curated, 1 central profile, 2 daily log or trace/, 3 bank/."""
     profile = os.environ.get("PERSONAL_MEMORY_PROFILE", "")
     if profile and os.path.abspath(path) == os.path.abspath(profile):
         return 1
     if "/memory/bank/" in path:
         return 3
-    if _LOG_PATH.search(path):
+    if _LOG_PATH.search(path) or "/memory/trace/" in path:
         return 2
     return 0
 

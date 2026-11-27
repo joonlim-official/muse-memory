@@ -68,6 +68,14 @@ tree_targets() { # stdout: one candidate target per line (caller reads into TARG
   for f in "$ROOT"/memory/20*.md; do [ -e "$f" ] && printf '%s\n' "$f"; done
 }
 
+_load_tree_targets() {
+  TARGETS=()
+  local _t
+  while IFS= read -r _t; do
+    [ -n "$_t" ] && TARGETS+=("$_t")
+  done < <(tree_targets)
+}
+
 if [ "$#" -gt 0 ]; then
   TARGETS=("$@")
 elif [ ! -t 0 ]; then
@@ -84,10 +92,10 @@ elif [ ! -t 0 ]; then
     TARGETS=("$STDIN_TMP")
   else
     rm -f "$STDIN_TMP"; STDIN_TMP=""
-    mapfile -t TARGETS < <(tree_targets)
+    _load_tree_targets
   fi
 else
-  mapfile -t TARGETS < <(tree_targets)
+  _load_tree_targets
 fi
 
 SECRET_RE='sk-[A-Za-z0-9]{20,}|sk_(live|test)_[A-Za-z0-9]{10,}|AIza[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_.-]{20,}|AKIA[0-9A-Z]{16}|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|api[ _-]?key["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9_.-]{16,}|password["'"'"' ]*[:=]["'"'"' ]*[^ ]+|passwd["'"'"' ]*[:=]'

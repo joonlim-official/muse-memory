@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""memory-trace-rotate: archive old closed trace.md entries into trace/archive/YYYY-MM.md.
+
+Keeps trace/trace.md bounded and fast while preserving full history without deletion:
+  - Keeps entries from the last N months (default: 2)
+  - Always keeps entries whose status token is `open |` regardless of age
+  - Archives older non-open entries atomically into memory/trace/archive/YYYY-MM.md
+  - Deduplicates lines when re-run (idempotent)
+
+Usage: memory-trace-rotate [--keep-months N] [--dry-run] [memory-root]
+Exit: 0 = ok, 2 = trace.md missing / usage error
+"""
+
+import argparse
+import datetime
+import os
+import re
+import sys
+from pathlib import Path
+
+DATE_RE = re.compile(r"\b(20\d{2}-\d{2})-\d{2}\b")
+OPEN_RE = re.compile(r"^-\s+\[[^\]]+\]\s+open\s*\|")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Archive old non-open trace.md entries into trace/archive/YYYY-MM.md.")
+    parser.add_argument("root", nargs="?", default=os.environ.get("PERSONAL_MEMORY_ROOT", str(Path.home())))
+    parser.add_argument("--keep-months", type=int, default=2, help="Number of recent calendar months to keep in trace.md.")
+    parser.add_argument("--dry-run", action="store_true", help="Report what would be archived without writing.")
+    args = parser.parse_args(argv)
+
+    root = Path(args.root)
+    trace_path = root / "memory" / "trace" / "trace.md"
+    if not trace_path.is_file():
+        print(f"memory-trace-rotate: trace.md not found at {trace_path}", file=sys.stderr)
+        return 2
+
+    today = datetime.date.today()
+    keep_months: set[str] = set()
+    y, m = today.year, today.month
+    for _ in range(max(1, args.keep_months)):
+        keep_months.add(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+
+    lines = trace_path.read_text(encoding="utf-8").splitlines()
+    kept: list[str] = []
+    by_month: dict[str, list[str]] = {}
+
+    for line in lines:
+        stripped = line.lstrip()
+        if not stripped.startswith("- [") or OPEN_RE.match(stripped):
+            kept.append(line)
+            continue
+        dates = DATE_RE.findall(line)
+        if not dates:
+            kept.append(line)
+            continue
+        ym = dates[-1]
+        if ym in keep_months:
+            kept.append(line)
+        else:
+            by_month.setdefault(ym, []).append(line)
+
+    archived_total = sum(len(v) for v in by_month.values())
+    if args.dry_run:
+        print(f"DRY RUN: would archive {archived_total} entries across {len(by_month)} month(s); keep {len(kept)} lines.")
+        return 0
+
+    archive_dir = root / "memory" / "trace" / "archive"
+    for ym, month_lines in sorted(by_month.items()):
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        arch_path = archive_dir / f"{ym}.md"
+        existing = arch_path.read_text(encoding="utf-8").splitlines() if arch_path.is_file() else [f"# Trace Archive — {ym}", ""]
+        existing_set = set(existing)
+        to_add = [l for l in month_lines if l not in existing_set]
+        if to_add:
+            tmp = arch_path.with_name(f".{arch_path.name}.tmp")
+            tmp.write_text("\n".join(existing + to_add) + "\n", encoding="utf-8")
+            tmp.replace(arch_path)
+
+    if archived_total > 0:
+        tmp_t = trace_path.with_name(".trace.md.tmp")
+        tmp_t.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        tmp_t.replace(trace_path)
+
+    print(f"TRACE_ROTATE_OK: archived={archived_total} months={len(by_month)} kept_lines={len(kept)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

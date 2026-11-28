@@ -118,6 +118,37 @@ Semantic spot-checks use a fixed rubric with recorded verdicts.
 
 ## History
 
+- 2026-11-27 (night): eighth iteration — NOPASSWD sudoers-keyword false
+  positive in `SECRET_RE`. The Mac mini scoped-sudoers install (Joon,
+  Nov 27 ~1:02 PM PT: `joonhyunglim ALL=(ALL) NOPASSWD: /usr/bin/killall
+  syspolicyd`, one exact command) was recorded in the daily log, and the
+  nightly `memory-audit` aborted at check 1: the unanchored
+  `passwd["' ]*[:=]` branch matches "NOPASSWD:" (case-insensitive grep),
+  so a legitimate config keyword read as a credential assignment and
+  exit 2 skipped checks 2–12. No credential value is present — the rule
+  is a privilege grant Joon installed and documented in AGENTS.md /
+  TOOLS.md. Fix: the `passwd` branch now anchors on start-of-line or a
+  non-letter (`(^|[^A-Za-z])passwd["' ]*[:=]`), in `memory-guard` and
+  `memory-egress-check` (both gates must agree) and in the
+  `leakage-audit` fixture-purity SHAPES for alignment; the `password`
+  branch is untouched ("NOPASSWORD" is not a keyword). New regression
+  tests: fixtures `nopasswd.txt` (guard rc=0) and `passwd-value.txt`
+  (guard rc=1, declared synthetic value from SYNTHETIC.txt), corpus
+  case `nopasswd_sudoers` (expect 0); the purity loop strips a leading
+  non-alphanumeric from extracted tokens because grep -o includes the
+  anchor character (no declared shape starts with one). Validation:
+  bash -n clean on all three changed scripts; leakage-audit CLEAN 109/109
+  (5 skipped, was 105); adversarial-run 40/40 (block 20/20, review 9/9,
+  clean 11/11); skill shell tests 4/4; memory-audit re-run full (exit 1,
+  only the two known flags).
+  Documented residual, not fixed: the stub test-double's
+  STUB_SECRET_CAND still extracts NOPASSWD as a candidate (its verdict
+  comes from the blockset hash, so a NOPASSWD line is review-tier rc=2
+  under the stub, not clean) — the stub is explicitly not a detector and
+  no stub test exercises NOPASSWD content; rebuilding its blockset for
+  this one keyword was judged churn over correctness, and the real gates
+  are the protection layer.
+
 - 2026-11-25 (night): seventh iteration — allowlist decimal/comma continuation masking in
   `memory-guard`. The nightly §11c promotion of the Taekwon Kids membership amounts ($5,562 total, Ian $3,038.50 / Rowan $2,523.50) exposed it: the `.figure-allowlist` entry `$338` (SoCal trip, reviewed 2026-09-09) was matched whole-word (`grep -vwF`, the 2026-11-07 fix), but "." and "," are word boundaries, so `$338` still exempted the whole line containing `$338.50` — the new membership line never reached the review report. Same shape for commas (`$1,231` exempting `$1,231,000`). Fix: new `_allowlist_filter` (awk) in `memory-guard` (figure + PII tiers) exempts an entry only as a complete figure token — whole-word AND not followed by "." or "," plus a digit — and only when some occurrence is clean and none continues; sentence-final periods ("$338.") and allowlisted phones stay exempt. Mirrored in the leakage-audit stub guard's `allow_hit()`. New regression tests in `leakage-audit` (fixtures `figure-decimal.txt`, `figure-338.txt`, `figure-comma.txt`, `figure-1231.txt`): `$338.50` still flagged under a `$338` allowlist, `$338` still exempted, `$1,231,000` still flagged, `$1,231` still exempted. Validation: bash -n clean on all three changed scripts; leakage-audit CLEAN 105/105 (5 skipped, was 101) against the patched skill and 109/109 (1 skipped) against the stub; adversarial-run 39/39; skill shell tests 4/4; memory-audit re-run shows the same two known flags (check-1 figure set now includes the $5,562 line, verified by direct file scan — the tree scan's head-20 display cap still hides which lines are reported; check-4 will-executor thread). Residual, documented not fixed: line-co-occurrence masking — an exact allowlisted figure on a line still exempts the whole line, so a different new figure sharing that line stays hidden (verified live: "Total $5,562 and SoCal $338" → rc=0). Measured 72 such lines in the tree; every non-allowlisted token on them traces to the known classified set or the reviewed finance-extraction family, so no other figure is currently hidden — but the filter is line-scoped by design, same caveat as the public-patterns scope note.
 
